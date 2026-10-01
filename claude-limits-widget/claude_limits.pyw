@@ -23,6 +23,7 @@
 
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -43,6 +44,7 @@ STALE_SECONDS = 900            # данные из Claude Code старше 15 �
 RATE_LIMIT_BACKOFF = 900
 WEB_URL = "https://claude.ai/api/organizations"
 WEB_INTERVAL = 120             # claude.ai спрашиваем раз в 2 минуты
+INSTANCE_PORT = 47853          # занятый порт = виджет уже запущен
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
 LOG = Path.home() / ".claude_limits_widget.log"
@@ -114,8 +116,8 @@ def fetch_usage():
             except ValueError:
                 wait = RATE_LIMIT_BACKOFF
             wait = max(wait, 60)
-            raise LimitsError("Сервер лимитов перегружен (429).\n"
-                              "Цифры придут из Claude Code\nпосле следующего ответа.",
+            raise LimitsError("Сервер Claude Code перегружен (429).\n"
+                              "Лучше: правая кнопка →\n«Ключ claude.ai…»",
                               retry_after=wait)
         if e.code == 403 and "scope" in msg.lower():
             raise LimitsError("У токена нет доступа к лимитам.\n"
@@ -394,16 +396,14 @@ class Widget:
         self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
 
     def save_position(self, _e=None):
-        self.settings.update(x=self.root.winfo_x(), y=self.root.winfo_y())
-        self.save_settings()
+        self.save_settings(x=self.root.winfo_x(), y=self.root.winfo_y())
 
     def show_menu(self, e):
         self.menu.tk_popup(e.x_root, e.y_root)
 
     def toggle_compact(self):
         self.compact = not self.compact
-        self.settings["compact"] = self.compact
-        self.save_settings()
+        self.save_settings(compact=self.compact)
         self.apply_compact()
 
     def apply_compact(self):
@@ -424,9 +424,17 @@ class Widget:
         except (OSError, ValueError):
             return {}
 
-    def save_settings(self):
+    def save_settings(self, **changes):
+        """Меняет только переданные ключи (None — удалить), остальное в файле не трогает."""
+        data = self.load_settings()
+        for k, v in changes.items():
+            if v is None:
+                data.pop(k, None)
+                self.settings.pop(k, None)
+            else:
+                data[k] = self.settings[k] = v
         try:
-            SETTINGS.write_text(json.dumps(self.settings), encoding="utf-8")
+            SETTINGS.write_text(json.dumps(data), encoding="utf-8")
         except OSError:
             pass
 
@@ -447,7 +455,7 @@ class Widget:
             data = read_cache()
             if data:
                 self.cache_mtime = mtime
-                self.show_data(data, datetime.fromtimestamp(data.get("saved", mtime)))
+                self.show_data(data, datetime.fromtimestamp(data.get("saved", mtime)), "Code")
         self.root.after(5000, self.poll_cache)
 
     def interval(self):
@@ -473,12 +481,7 @@ class Widget:
         key = key.strip()
         if key.lower().startswith("sessionkey="):
             key = key.split("=", 1)[1]
-        self.settings.pop("org_id", None)
-        if key:
-            self.settings["session_key"] = key
-        else:
-            self.settings.pop("session_key", None)
-        self.save_settings()
+        self.save_settings(session_key=key or None, org_id=None)
         self.refresh()
 
     def refresh(self):
@@ -488,25 +491,26 @@ class Widget:
     def _load(self):
         try:
             key = self.settings.get("session_key")
+            source = "claude.ai" if key else "сервер"
             if key:
                 data, org_id = fetch_web_usage(key, self.settings.get("org_id"))
                 if org_id != self.settings.get("org_id"):
-                    self.settings["org_id"] = org_id
-                    self.root.after(0, self.save_settings)
+                    self.root.after(0, lambda: self.save_settings(org_id=org_id))
             else:
                 data = fetch_usage()
-            self.root.after(0, self.show_data, data)
+            self.root.after(0, self.show_data, data, None, source)
         except LimitsError as e:
             self.root.after(0, self.show_error, str(e), e.retry_after)
         except Exception as e:
             log(f"Unexpected: {e!r}")  # не даём виджету упасть
             self.root.after(0, self.show_error, f"Ошибка: {e}")
 
-    def show_data(self, data, at=None):
+    def show_data(self, data, at=None, source=""):
         self.error.pack_forget()
         self.session.set(parse_limit(data.get("five_hour")))
         self.week.set(parse_limit(data.get("seven_day")))
-        self.status.config(text=(at or datetime.now()).strftime("%H:%M"))
+        stamp = (at or datetime.now()).strftime("%H:%M")
+        self.status.config(text=f"{source} · {stamp}" if source else stamp)
         self.schedule(self.interval())
 
     def show_error(self, msg, retry_after=None):
@@ -537,4 +541,9 @@ if __name__ == "__main__":
     elif "--install" in sys.argv:
         install_main()
     else:
+        lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            lock.bind(("127.0.0.1", INSTANCE_PORT))
+        except OSError:
+            sys.exit(0)  # виджет уже открыт — второй не запускаем
         Widget().run()
