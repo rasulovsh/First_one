@@ -9,7 +9,10 @@
      Claude Code запускает этот же файл как строку состояния (statusLine) и
      передаёт ему лимиты после каждого ответа; они сохраняются в
      %USERPROFILE%\\.claude\\limits_widget_cache.json, а виджет их читает.
-  2. Запасной — сервер api.anthropic.com/api/oauth/usage (как /usage).
+  2. Страница лимитов claude.ai (как «Настройки → Использование») — видит
+     расход и в чате, и в Cowork, и в Claude Code. Нужен ключ сессии claude.ai
+     (cookie sessionKey из браузера), его вставляют через меню виджета.
+  3. Запасной — сервер api.anthropic.com/api/oauth/usage (как /usage).
      Он часто отвечает 429, поэтому виджет спрашивает его редко и только
      когда свежих данных из Claude Code нет.
 
@@ -24,6 +27,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from tkinter import simpledialog
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -37,6 +41,10 @@ SETTINGS = Path.home() / ".claude_limits_widget.json"
 API_INTERVAL = 900             # сервер лимитов быстро отвечает 429 — спрашиваем редко
 STALE_SECONDS = 900            # данные из Claude Code старше 15 мин считаем устаревшими
 RATE_LIMIT_BACKOFF = 900
+WEB_URL = "https://claude.ai/api/organizations"
+WEB_INTERVAL = 120             # claude.ai спрашиваем раз в 2 минуты
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
 LOG = Path.home() / ".claude_limits_widget.log"
 
 BG = "#1e1e1e"
@@ -115,6 +123,54 @@ def fetch_usage():
         raise LimitsError(f"Ошибка сервера {e.code}:\n{msg}")
     except (urllib.error.URLError, TimeoutError):
         raise LimitsError("Нет соединения")
+
+
+def web_get(url, session_key):
+    req = urllib.request.Request(url, headers={
+        "Cookie": f"sessionKey={session_key}",
+        "User-Agent": BROWSER_UA,
+        "Accept": "application/json",
+        "Referer": "https://claude.ai/settings/usage",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")
+        log(f"claude.ai HTTP {e.code}: {body[:500]}")
+        if e.code in (401, 403) and body.lstrip().startswith("{"):
+            raise LimitsError("Ключ claude.ai устарел.\nПравая кнопка →\n«Ключ claude.ai…»")
+        if e.code in (403, 503):
+            raise LimitsError("claude.ai не пустил запрос\n(защита от ботов).")
+        if e.code == 429:
+            raise LimitsError("claude.ai: слишком частые\nзапросы, повторю позже.",
+                              retry_after=RATE_LIMIT_BACKOFF)
+        raise LimitsError(f"claude.ai: ошибка {e.code}")
+    except (urllib.error.URLError, TimeoutError):
+        raise LimitsError("Нет соединения")
+    except ValueError:
+        raise LimitsError("claude.ai ответил\nне так, как ожидалось.")
+
+
+def pick_org(orgs):
+    """Из списка организаций берём ту, где подписка Pro/Max (чат)."""
+    if not orgs:
+        raise LimitsError("В аккаунте claude.ai\nнет организаций.")
+    for org in orgs:
+        caps = org.get("capabilities") or []
+        if any(c in caps for c in ("claude_max", "claude_pro")):
+            return org["uuid"]
+    for org in orgs:
+        if "chat" in (org.get("capabilities") or []):
+            return org["uuid"]
+    return orgs[0]["uuid"]
+
+
+def fetch_web_usage(session_key, org_id=None):
+    """-> (данные лимитов, org_id). Формат тот же, что у /api/oauth/usage."""
+    if not org_id:
+        org_id = pick_org(web_get(WEB_URL, session_key))
+    return web_get(f"{WEB_URL}/{org_id}/usage", session_key), org_id
 
 
 def parse_limit(block):
@@ -292,7 +348,8 @@ class Widget:
                               font=("Segoe UI", 8), justify="left")
 
         self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label="Спросить сервер сейчас", command=self.refresh)
+        self.menu.add_command(label="Обновить сейчас", command=self.refresh)
+        self.menu.add_command(label="Ключ claude.ai…", command=self.ask_session_key)
         self.menu.add_command(label="Компактный режим", command=self.toggle_compact)
         self.menu.add_separator()
         self.menu.add_command(label="Выход", command=self.quit)
@@ -393,12 +450,36 @@ class Widget:
                 self.show_data(data, datetime.fromtimestamp(data.get("saved", mtime)))
         self.root.after(5000, self.poll_cache)
 
+    def interval(self):
+        return WEB_INTERVAL if self.settings.get("session_key") else API_INTERVAL
+
     def maybe_refresh(self):
-        """К серверу идём, только если из Claude Code давно ничего не было."""
-        if self.cache_is_fresh():
-            self.schedule(API_INTERVAL)
+        """claude.ai спрашиваем всегда; сервер Claude Code — только если
+        из самого Claude Code давно ничего не приходило."""
+        if not self.settings.get("session_key") and self.cache_is_fresh():
+            self.schedule(self.interval())
         else:
             self.refresh()
+
+    def ask_session_key(self):
+        key = simpledialog.askstring(
+            "Ключ claude.ai",
+            "Вставьте значение cookie sessionKey с claude.ai\n"
+            "(начинается с sk-ant-sid…). Пустое поле — удалить ключ.\n"
+            "Ключ хранится только на этом компьютере.",
+            parent=self.root, show="*")
+        if key is None:
+            return
+        key = key.strip()
+        if key.lower().startswith("sessionkey="):
+            key = key.split("=", 1)[1]
+        self.settings.pop("org_id", None)
+        if key:
+            self.settings["session_key"] = key
+        else:
+            self.settings.pop("session_key", None)
+        self.save_settings()
+        self.refresh()
 
     def refresh(self):
         self.status.config(text="обновление…")
@@ -406,7 +487,14 @@ class Widget:
 
     def _load(self):
         try:
-            data = fetch_usage()
+            key = self.settings.get("session_key")
+            if key:
+                data, org_id = fetch_web_usage(key, self.settings.get("org_id"))
+                if org_id != self.settings.get("org_id"):
+                    self.settings["org_id"] = org_id
+                    self.root.after(0, self.save_settings)
+            else:
+                data = fetch_usage()
             self.root.after(0, self.show_data, data)
         except LimitsError as e:
             self.root.after(0, self.show_error, str(e), e.retry_after)
@@ -419,14 +507,14 @@ class Widget:
         self.session.set(parse_limit(data.get("five_hour")))
         self.week.set(parse_limit(data.get("seven_day")))
         self.status.config(text=(at or datetime.now()).strftime("%H:%M"))
-        self.schedule(API_INTERVAL)
+        self.schedule(self.interval())
 
     def show_error(self, msg, retry_after=None):
         # последние полученные цифры остаются на экране, ниже — причина ошибки
         self.error.config(text=msg)
         self.error.pack(anchor="w", pady=(4, 0))
         self.status.config(text="ошибка")
-        self.schedule(max(retry_after or 0, API_INTERVAL))
+        self.schedule(max(retry_after or 0, self.interval()))
 
     def schedule(self, seconds):
         if self._job:
