@@ -4,9 +4,14 @@
   * 5-часовой лимит (сессия) — процент использования и время до сброса;
   * недельный лимит — процент использования и время до сброса.
 
-Данные берутся из того же источника, что и команда /usage в Claude Code:
-токен входа читается из %USERPROFILE%\\.claude\\.credentials.json
-(файл появляется после входа в Claude Code через подписку Pro/Max).
+Откуда берутся цифры:
+  1. Основной источник — сам Claude Code. После «claude_limits.pyw --install»
+     Claude Code запускает этот же файл как строку состояния (statusLine) и
+     передаёт ему лимиты после каждого ответа; они сохраняются в
+     %USERPROFILE%\\.claude\\limits_widget_cache.json, а виджет их читает.
+  2. Запасной — сервер api.anthropic.com/api/oauth/usage (как /usage).
+     Он часто отвечает 429, поэтому виджет спрашивает его редко и только
+     когда свежих данных из Claude Code нет.
 
 Только стандартная библиотека Python — ничего ставить не нужно.
 Управление: перетаскивать мышью, двойной клик — обновить,
@@ -15,7 +20,9 @@
 
 import json
 import os
+import sys
 import threading
+import time
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -23,10 +30,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-CREDENTIALS = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")) / ".credentials.json"
+CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+CREDENTIALS = CLAUDE_DIR / ".credentials.json"
+CACHE = CLAUDE_DIR / "limits_widget_cache.json"
 SETTINGS = Path.home() / ".claude_limits_widget.json"
-REFRESH_SECONDS = 180          # сервер ограничивает частые запросы (429)
-RATE_LIMIT_BACKOFF = 600
+API_INTERVAL = 900             # сервер лимитов быстро отвечает 429 — спрашиваем редко
+STALE_SECONDS = 900            # данные из Claude Code старше 15 мин считаем устаревшими
+RATE_LIMIT_BACKOFF = 900
 LOG = Path.home() / ".claude_limits_widget.log"
 
 BG = "#1e1e1e"
@@ -96,7 +106,8 @@ def fetch_usage():
             except ValueError:
                 wait = RATE_LIMIT_BACKOFF
             wait = max(wait, 60)
-            raise LimitsError(f"Сервер просит подождать.\nПовтор через {wait // 60} мин.",
+            raise LimitsError("Сервер лимитов перегружен (429).\n"
+                              "Цифры придут из Claude Code\nпосле следующего ответа.",
                               retry_after=wait)
         if e.code == 403 and "scope" in msg.lower():
             raise LimitsError("У токена нет доступа к лимитам.\n"
@@ -107,18 +118,86 @@ def fetch_usage():
 
 
 def parse_limit(block):
-    """{'utilization': 42.0, 'resets_at': '...'} -> (процент, datetime|None)."""
+    """Блок лимита -> (процент, datetime|None).
+
+    Сервер присылает {'utilization': 42.0, 'resets_at': '2026-...Z'},
+    Claude Code — {'used_percentage': 42.0, 'resets_at': 1790000000}.
+    """
     if not block:
         return None
-    pct = float(block.get("utilization") or 0)
+    pct = block.get("used_percentage", block.get("utilization"))
+    pct = float(pct or 0)
     resets = block.get("resets_at")
     when = None
-    if resets:
-        try:
+    try:
+        if isinstance(resets, (int, float)):
+            when = datetime.fromtimestamp(resets, timezone.utc)
+        elif resets:
             when = datetime.fromisoformat(resets.replace("Z", "+00:00"))
-        except ValueError:
-            pass
+    except (ValueError, OSError, OverflowError):
+        pass
     return pct, when
+
+
+def read_cache():
+    try:
+        return json.loads(CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+# --- режим строки состояния Claude Code (--statusline) ----------------------
+def statusline_main():
+    """Claude Code передаёт сюда JSON сессии; сохраняем лимиты и печатаем строку."""
+    try:
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
+    except ValueError:
+        data = {}
+    limits = data.get("rate_limits") or {}
+    if limits:
+        try:
+            tmp = CACHE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"saved": time.time(), **limits}), encoding="utf-8")
+            os.replace(tmp, CACHE)
+        except OSError:
+            pass
+    parts = [(data.get("model") or {}).get("display_name") or "Claude"]
+    for key, name in (("five_hour", "5ч"), ("seven_day", "нед")):
+        lim = parse_limit(limits.get(key))
+        if lim:
+            parts.append(f"{name} {lim[0]:.0f}%")
+    sys.stdout.buffer.write(" · ".join(parts).encode("utf-8"))
+
+
+def install_main():
+    """Прописывает этот файл строкой состояния в ~/.claude/settings.json."""
+    settings_path = CLAUDE_DIR / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        settings = {}
+    except (OSError, ValueError) as e:
+        print(f"Не удалось прочитать {settings_path}: {e}")
+        return
+    python = Path(sys.executable)
+    if python.name.lower() == "pythonw.exe":
+        python = python.with_name("python.exe")
+    # прямые слэши работают и в cmd, и в Git Bash, через который Claude Code запускает команду
+    command = f'"{python.as_posix()}" "{Path(__file__).resolve().as_posix()}" --statusline'
+    old = settings.get("statusLine")
+    if old and old.get("command") != command:
+        print(f"Сейчас в Claude Code уже настроена строка состояния:\n  {old.get('command')}")
+        if input("Заменить её на виджет лимитов? (y/n): ").strip().lower() not in ("y", "д", "yes", "да"):
+            print("Ничего не изменено.")
+            return
+        settings_path.with_suffix(".json.bak").write_text(
+            settings_path.read_text(encoding="utf-8"), encoding="utf-8")
+        print("Старые настройки сохранены в settings.json.bak")
+    settings["statusLine"] = {"type": "command", "command": command}
+    CLAUDE_DIR.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+    print("Готово. Перезапустите Claude Code — после первого ответа\n"
+          "лимиты появятся внизу Claude Code и в виджете.")
 
 
 def format_left(when):
@@ -213,7 +292,7 @@ class Widget:
                               font=("Segoe UI", 8), justify="left")
 
         self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label="Обновить", command=self.refresh)
+        self.menu.add_command(label="Спросить сервер сейчас", command=self.refresh)
         self.menu.add_command(label="Компактный режим", command=self.toggle_compact)
         self.menu.add_separator()
         self.menu.add_command(label="Выход", command=self.quit)
@@ -227,9 +306,12 @@ class Widget:
             w.bind("<Double-Button-1>", lambda e: self.refresh())
             w.bind("<Button-3>", self.show_menu)
 
+        self.cache_mtime = None
+        self._job = None
         self.apply_compact()
         self.place_window()
-        self.refresh()
+        self.poll_cache()
+        self.maybe_refresh()
         self.tick()
 
     # --- окно -------------------------------------------------------------
@@ -292,6 +374,32 @@ class Widget:
             pass
 
     # --- данные ------------------------------------------------------------
+    def cache_is_fresh(self):
+        try:
+            return time.time() - CACHE.stat().st_mtime < STALE_SECONDS
+        except OSError:
+            return False
+
+    def poll_cache(self):
+        """Каждые 5 с проверяет, не прислал ли Claude Code новые цифры."""
+        try:
+            mtime = CACHE.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime and mtime != self.cache_mtime:
+            data = read_cache()
+            if data:
+                self.cache_mtime = mtime
+                self.show_data(data, datetime.fromtimestamp(data.get("saved", mtime)))
+        self.root.after(5000, self.poll_cache)
+
+    def maybe_refresh(self):
+        """К серверу идём, только если из Claude Code давно ничего не было."""
+        if self.cache_is_fresh():
+            self.schedule(API_INTERVAL)
+        else:
+            self.refresh()
+
     def refresh(self):
         self.status.config(text="обновление…")
         threading.Thread(target=self._load, daemon=True).start()
@@ -306,24 +414,24 @@ class Widget:
             log(f"Unexpected: {e!r}")  # не даём виджету упасть
             self.root.after(0, self.show_error, f"Ошибка: {e}")
 
-    def show_data(self, data):
+    def show_data(self, data, at=None):
         self.error.pack_forget()
         self.session.set(parse_limit(data.get("five_hour")))
         self.week.set(parse_limit(data.get("seven_day")))
-        self.status.config(text=datetime.now().strftime("%H:%M"))
-        self.schedule(REFRESH_SECONDS)
+        self.status.config(text=(at or datetime.now()).strftime("%H:%M"))
+        self.schedule(API_INTERVAL)
 
     def show_error(self, msg, retry_after=None):
         # последние полученные цифры остаются на экране, ниже — причина ошибки
         self.error.config(text=msg)
         self.error.pack(anchor="w", pady=(4, 0))
         self.status.config(text="ошибка")
-        self.schedule(retry_after or REFRESH_SECONDS)
+        self.schedule(max(retry_after or 0, API_INTERVAL))
 
     def schedule(self, seconds):
-        if getattr(self, "_job", None):
+        if self._job:
             self.root.after_cancel(self._job)
-        self._job = self.root.after(seconds * 1000, self.refresh)
+        self._job = self.root.after(seconds * 1000, self.maybe_refresh)
 
     def tick(self):
         """Каждые 30 с обновляет обратный отсчёт до сброса без запроса к серверу."""
@@ -336,4 +444,9 @@ class Widget:
 
 
 if __name__ == "__main__":
-    Widget().run()
+    if "--statusline" in sys.argv:
+        statusline_main()
+    elif "--install" in sys.argv:
+        install_main()
+    else:
+        Widget().run()
