@@ -11,7 +11,8 @@
      %USERPROFILE%\\.claude\\limits_widget_cache.json, а виджет их читает.
   2. Страница лимитов claude.ai (как «Настройки → Использование») — видит
      расход и в чате, и в Cowork, и в Claude Code. Нужен ключ сессии claude.ai
-     (cookie sessionKey из браузера), его вставляют через меню виджета.
+     (cookie sessionKey из браузера): скопировать его и выбрать в меню виджета
+     «Вставить ключ из буфера».
   3. Запасной — сервер api.anthropic.com/api/oauth/usage (как /usage).
      Он часто отвечает 429, поэтому виджет спрашивает его редко и только
      когда свежих данных из Claude Code нет.
@@ -28,13 +29,12 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import simpledialog
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "6"
+VERSION = "7"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 CREDENTIALS = CLAUDE_DIR / ".credentials.json"
@@ -117,8 +117,8 @@ def fetch_usage():
             except ValueError:
                 wait = RATE_LIMIT_BACKOFF
             wait = max(wait, 60)
-            raise LimitsError("Сервер Claude Code перегружен (429).\n"
-                              "Лучше: правая кнопка →\n«Ключ claude.ai…»",
+            raise LimitsError("Ключ claude.ai не задан.\nСкопируйте sessionKey, затем\n"
+                              "правая кнопка →\n«Вставить ключ из буфера»",
                               retry_after=wait)
         if e.code == 403 and "scope" in msg.lower():
             raise LimitsError("У токена нет доступа к лимитам.\n"
@@ -142,7 +142,7 @@ def web_get(url, session_key):
         body = e.read().decode("utf-8", "replace")
         log(f"claude.ai HTTP {e.code}: {body[:500]}")
         if e.code in (401, 403) and body.lstrip().startswith("{"):
-            raise LimitsError("Ключ claude.ai устарел.\nПравая кнопка →\n«Ключ claude.ai…»")
+            raise LimitsError("Ключ claude.ai устарел.\nСкопируйте новый, затем\nправая кнопка →\n«Вставить ключ из буфера»")
         if e.code in (403, 503):
             raise LimitsError("claude.ai не пустил запрос\n(защита от ботов).")
         if e.code == 429:
@@ -352,7 +352,8 @@ class Widget:
 
         self.menu = tk.Menu(self.root, tearoff=0)
         self.menu.add_command(label="Обновить сейчас", command=self.refresh)
-        self.menu.add_command(label="Ключ claude.ai…", command=self.ask_session_key)
+        self.menu.add_command(label="Вставить ключ из буфера", command=self.paste_session_key)
+        self.menu.add_command(label="Удалить ключ claude.ai", command=self.forget_session_key)
         self.menu.add_command(label="Компактный режим", command=self.toggle_compact)
         self.menu.add_separator()
         self.menu.add_command(label="Выход", command=self.quit)
@@ -470,19 +471,25 @@ class Widget:
         else:
             self.refresh()
 
-    def ask_session_key(self):
-        key = simpledialog.askstring(
-            "Ключ claude.ai",
-            "Вставьте значение cookie sessionKey с claude.ai\n"
-            "(начинается с sk-ant-sid…). Пустое поле — удалить ключ.\n"
-            "Ключ хранится только на этом компьютере.",
-            parent=self.root, show="*")
-        if key is None:
-            return
-        key = key.strip()
+    def paste_session_key(self):
+        """Берёт ключ прямо из буфера обмена: окно ввода не нужно, а Ctrl+V
+        в окнах tkinter не работает при русской раскладке."""
+        try:
+            key = self.root.clipboard_get().strip().strip('"')
+        except tk.TclError:
+            key = ""
         if key.lower().startswith("sessionkey="):
-            key = key.split("=", 1)[1]
-        self.save_settings(session_key=key or None, org_id=None)
+            key = key.split("=", 1)[1].strip()
+        if not key.startswith("sk-ant-"):
+            self.show_error("В буфере обмена не ключ.\nСкопируйте значение sessionKey\n"
+                            "(начинается с sk-ant-sid…)\nи повторите.")
+            return
+        self.save_settings(session_key=key, org_id=None)
+        self.root.clipboard_clear()  # не оставляем ключ в буфере
+        self.refresh()
+
+    def forget_session_key(self):
+        self.save_settings(session_key=None, org_id=None)
         self.refresh()
 
     def refresh(self):
