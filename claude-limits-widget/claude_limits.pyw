@@ -25,7 +25,9 @@ from pathlib import Path
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CREDENTIALS = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")) / ".credentials.json"
 SETTINGS = Path.home() / ".claude_limits_widget.json"
-REFRESH_SECONDS = 60
+REFRESH_SECONDS = 180          # сервер ограничивает частые запросы (429)
+RATE_LIMIT_BACKOFF = 600
+LOG = Path.home() / ".claude_limits_widget.log"
 
 BG = "#1e1e1e"
 FG = "#e6e6e6"
@@ -35,7 +37,25 @@ ACCENT = "#d97757"  # фирменный оранжевый Claude
 
 
 class LimitsError(Exception):
-    pass
+    def __init__(self, msg, retry_after=None):
+        super().__init__(msg)
+        self.retry_after = retry_after
+
+
+def log(text):
+    """Пишет подробности ошибок в %USERPROFILE%\\.claude_limits_widget.log."""
+    try:
+        with LOG.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {text}\n")
+    except OSError:
+        pass
+
+
+def server_message(body):
+    try:
+        return json.loads(body)["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        return body[:120]
 
 
 def read_token():
@@ -67,7 +87,21 @@ def fetch_usage():
     except urllib.error.HTTPError as e:
         if e.code == 401:
             raise LimitsError("Токен истёк.\nОткройте Claude Code —\nон обновит вход.")
-        raise LimitsError(f"Ошибка сервера: {e.code}")
+        body = e.read().decode("utf-8", "replace")
+        log(f"HTTP {e.code}: {body[:500]}")
+        msg = server_message(body)
+        if e.code == 429:
+            try:
+                wait = int(e.headers.get("Retry-After") or RATE_LIMIT_BACKOFF)
+            except ValueError:
+                wait = RATE_LIMIT_BACKOFF
+            wait = max(wait, 60)
+            raise LimitsError(f"Сервер просит подождать.\nПовтор через {wait // 60} мин.",
+                              retry_after=wait)
+        if e.code == 403 and "scope" in msg.lower():
+            raise LimitsError("У токена нет доступа к лимитам.\n"
+                              "В терминале: claude → /login\n(не setup-token).")
+        raise LimitsError(f"Ошибка сервера {e.code}:\n{msg}")
     except (urllib.error.URLError, TimeoutError):
         raise LimitsError("Нет соединения")
 
@@ -267,8 +301,9 @@ class Widget:
             data = fetch_usage()
             self.root.after(0, self.show_data, data)
         except LimitsError as e:
-            self.root.after(0, self.show_error, str(e))
-        except Exception as e:  # не даём виджету упасть
+            self.root.after(0, self.show_error, str(e), e.retry_after)
+        except Exception as e:
+            log(f"Unexpected: {e!r}")  # не даём виджету упасть
             self.root.after(0, self.show_error, f"Ошибка: {e}")
 
     def show_data(self, data):
@@ -278,11 +313,12 @@ class Widget:
         self.status.config(text=datetime.now().strftime("%H:%M"))
         self.schedule(REFRESH_SECONDS)
 
-    def show_error(self, msg):
+    def show_error(self, msg, retry_after=None):
+        # последние полученные цифры остаются на экране, ниже — причина ошибки
         self.error.config(text=msg)
         self.error.pack(anchor="w", pady=(4, 0))
         self.status.config(text="ошибка")
-        self.schedule(REFRESH_SECONDS)
+        self.schedule(retry_after or REFRESH_SECONDS)
 
     def schedule(self, seconds):
         if getattr(self, "_job", None):
