@@ -34,6 +34,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+VERSION = "6"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 CREDENTIALS = CLAUDE_DIR / ".credentials.json"
@@ -336,7 +337,7 @@ class Widget:
 
         head = tk.Frame(body, bg=BG)
         head.pack(fill="x", pady=(0, 4))
-        tk.Label(head, text="✳ Claude", bg=BG, fg=ACCENT,
+        tk.Label(head, text=f"✳ Claude  v{VERSION}", bg=BG, fg=ACCENT,
                  font=("Segoe UI", 9, "bold")).pack(side="left")
         self.status = tk.Label(head, text="…", bg=BG, fg=DIM, font=("Segoe UI", 8))
         self.status.pack(side="right")
