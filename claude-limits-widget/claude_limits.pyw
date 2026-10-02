@@ -32,9 +32,15 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+
+try:  # значок в области уведомлений (у часов); без этих библиотек виджет работает и так
+    import pystray
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    pystray = None
 from pathlib import Path
 
-VERSION = "8"
+VERSION = "9"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 CREDENTIALS = CLAUDE_DIR / ".credentials.json"
@@ -283,6 +289,28 @@ def bar_color(pct):
     return "#57ab5a"
 
 
+def tray_image(pct):
+    """Квадратный значок цвета полоски с процентом 5-часового лимита."""
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    color = ACCENT if pct is None else bar_color(pct)
+    draw.rounded_rectangle((0, 0, 63, 63), radius=14, fill=color)
+    text = "C" if pct is None else f"{min(int(round(pct)), 99)}"
+    font = None
+    for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"):
+        try:
+            font = ImageFont.truetype(name, 40 if len(text) < 2 else 36)
+            break
+        except OSError:
+            pass
+    font = font or ImageFont.load_default()
+    box = draw.textbbox((0, 0), text, font=font)
+    x = (64 - (box[2] - box[0])) / 2 - box[0]
+    y = (64 - (box[3] - box[1])) / 2 - box[1]
+    draw.text((x, y), text, font=font, fill="white")
+    return img
+
+
 class Row:
     WIDTH = 190
 
@@ -355,6 +383,7 @@ class Widget:
         self.menu.add_command(label="Вставить ключ из буфера", command=self.paste_session_key)
         self.menu.add_command(label="Удалить ключ claude.ai", command=self.forget_session_key)
         self.menu.add_command(label="Компактный режим", command=self.toggle_compact)
+        self.menu.add_command(label="Скрыть (значок у часов)", command=self.hide)
         self.menu.add_separator()
         self.menu.add_command(label="Выход", command=self.quit)
 
@@ -369,6 +398,7 @@ class Widget:
 
         self.cache_mtime = None
         self._job = None
+        self.tray = None
         self.apply_compact()
         self.place_window()
         self.poll_cache()
@@ -437,8 +467,59 @@ class Widget:
         self.root.lift()
         self.save_position()
 
+    # --- значок у часов ---------------------------------------------------
+    def start_tray(self):
+        if pystray is None:
+            log("pystray/Pillow не установлены — значка у часов не будет")
+            return
+        ui = lambda fn: (lambda icon, item: self.root.after(0, fn))
+        menu = pystray.Menu(
+            pystray.MenuItem("Показать / скрыть", ui(self.toggle_visible), default=True),
+            pystray.MenuItem("Вернуть в угол экрана", ui(self.bring_back)),
+            pystray.MenuItem("Обновить сейчас", ui(self.refresh)),
+            pystray.MenuItem("Вставить ключ из буфера", ui(self.paste_session_key)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Выход", ui(self.quit)),
+        )
+        try:
+            self.tray = pystray.Icon("claude_limits", tray_image(None), "Claude — лимиты", menu)
+            self.tray.run_detached()
+        except Exception as e:
+            log(f"Tray: {e!r}")
+            self.tray = None
+
+    def update_tray(self, session, week):
+        if not self.tray:
+            return
+        try:
+            self.tray.icon = tray_image(session[0] if session else None)
+            parts = [f"{name}: {lim[0]:.0f}%" for name, lim in
+                     (("Сессия 5 ч", session), ("Неделя", week)) if lim]
+            self.tray.title = "Claude — " + (" · ".join(parts) or "лимиты")
+        except Exception as e:
+            log(f"Tray update: {e!r}")
+
+    def hide(self):
+        if self.tray:
+            self.root.withdraw()
+        else:  # без значка спрятанный виджет было бы не вернуть
+            self.show_error("Значок у часов недоступен.\nЗапустите start.bat заново.")
+
+    def toggle_visible(self):
+        if self.root.state() == "withdrawn":
+            self.root.deiconify()
+            self.root.attributes("-topmost", True)
+            self.root.lift()
+        else:
+            self.hide()
+
     def quit(self):
         self.save_position()
+        if self.tray:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
         self.root.destroy()
 
     # --- настройки ---------------------------------------------------------
@@ -537,8 +618,10 @@ class Widget:
 
     def show_data(self, data, at=None, source=""):
         self.error.pack_forget()
-        self.session.set(parse_limit(data.get("five_hour")))
-        self.week.set(parse_limit(data.get("seven_day")))
+        session, week = parse_limit(data.get("five_hour")), parse_limit(data.get("seven_day"))
+        self.session.set(session)
+        self.week.set(week)
+        self.update_tray(session, week)
         stamp = (at or datetime.now()).strftime("%H:%M")
         self.status.config(text=f"{source} · {stamp}" if source else stamp)
         self.schedule(self.interval())
@@ -583,4 +666,5 @@ if __name__ == "__main__":
             sys.exit(0)
         widget = Widget()
         widget.listen_for_show(lock)
+        widget.start_tray()
         widget.run()
