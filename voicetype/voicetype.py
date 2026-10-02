@@ -54,6 +54,9 @@ DEFAULT_CONFIG = {
     "live_model": "scribe_v2_realtime",
     "live_silence_seconds": 0.6,
     "live_typing": True,
+    # Отдельная модель для узбекского (whisper.cpp, .bin), например rubaiSTT
+    "uz_model_path": "",
+    "uz_hotkey": "<f8>",
     "insert_method": "type",
     # Исправление текста через Claude после распознавания (нужен ключ Anthropic)
     "polish": False,
@@ -378,6 +381,40 @@ class CloudEngine:
         )
         r.raise_for_status()
         return r.json().get("text", "").strip()
+
+
+class WhisperCppEngine:
+    """Модель whisper.cpp (файл .bin в формате ggml) на вашем компьютере.
+
+    Например, rubaiSTT — Whisper medium, дообученный на узбекской речи.
+    """
+
+    def __init__(self, cfg, path):
+        self.cfg = cfg
+        self.path = path
+        self.model = None
+
+    def load(self):
+        if not os.path.exists(self.path):
+            raise RuntimeError(f"нет файла модели {self.path}")
+        from pywhispercpp.model import Model
+        threads = max(1, min(8, os.cpu_count() or 4))
+        log.info("загружаю whisper.cpp модель %s (%d потоков)", self.path, threads)
+        self.model = Model(self.path, n_threads=threads, print_progress=False,
+                           print_realtime=False, print_timestamps=False)
+
+    def transcribe(self, audio, lang):
+        lang = lang or "uz"
+        segments = self.model.transcribe(
+            audio.astype(np.float32), language=lang, initial_prompt=PROMPTS.get(lang)
+        )
+        return " ".join(seg.text.strip() for seg in segments).strip()
+
+
+def uz_model_path(cfg):
+    """Путь к узбекской модели: из настроек или models/ggml-rubaistt.bin рядом с программой."""
+    path = cfg.get("uz_model_path") or os.path.join(APP_DIR, "models", "ggml-rubaistt.bin")
+    return path if os.path.exists(path) else None
 
 
 class ElevenLabsLive:
@@ -758,7 +795,14 @@ class App:
 
         self.engine = make_engine(self.cfg)
         self.live = getattr(self.engine, "live", False)
-        self.recorder = Recorder(self.cfg, lambda seg, s: self.jobs.put((seg, s)))
+        path = uz_model_path(self.cfg)
+        self.uz_engine = WhisperCppEngine(self.cfg, path) if path else None
+        self.uz_ready = False
+        self.job_engine = None
+        self.recording_live = False
+        self.recorder = Recorder(
+            self.cfg, lambda seg, s: self.jobs.put((seg, ("rec", s), self.job_engine))
+        )
         self.live_recorder = LiveRecorder()
         self.live_session = None
         self.live_id = 0
@@ -786,6 +830,14 @@ class App:
             lambda: self.events.put("hotkey_up"),
         )
         self.hotkey.start()
+        if self.cfg.get("uz_hotkey"):
+            try:
+                self.uz_hotkey = HotkeyListener(
+                    self.cfg["uz_hotkey"], lambda: self.events.put("toggle_uz"), lambda: None
+                )
+                self.uz_hotkey.start()
+            except Exception:
+                log.exception("клавиша переключения UZ не назначилась")
         self.root.after(50, self._tick)
         self.root.after(3000, self._keep_on_top)
         if getattr(self, "_flash_later", None):
@@ -982,10 +1034,16 @@ class App:
         if not self.ready:
             return self._flash("Модель ещё грузится…")
         try:
-            if self.live:
-                self._start_live()
-            else:
+            use_uz = self.cfg["language"] == "uz" and self.uz_engine is not None
+            if use_uz and not self.uz_ready:
+                return self._flash("Узбекская модель ещё грузится…")
+            if use_uz or not self.live:
+                self.job_engine = self.uz_engine if use_uz else self.engine
                 self.recorder.start()
+                self.recording_live = False
+            else:
+                self._start_live()
+                self.recording_live = True
             self.recording = True
         except Exception as ex:
             log.exception("микрофон не открылся")
@@ -1007,7 +1065,7 @@ class App:
             if self.polisher is not None or not type_live:
                 self.events.put(("preview", ""))
                 if text.strip():
-                    self.jobs.put((text, sid))
+                    self.jobs.put((text, ("live", sid), None))
             else:
                 self.out.put(("final", text, sid))
 
@@ -1024,7 +1082,7 @@ class App:
             return
         self.recording = False
         try:
-            if self.live:
+            if self.recording_live:
                 self.live_recorder.stop()
                 if self.live_session is not None:
                     self.live_session.stop()
@@ -1105,6 +1163,23 @@ class App:
         engine.trace_add("write", show_key)
         show_key()
 
+        tk.Label(win, text="Узбекская модель (для языка UZ)", font=("", 10, "bold")).grid(
+            row=10, column=0, columnspan=2, **pad)
+        uz_path = tk.Entry(win, width=46)
+        uz_path.insert(0, self.cfg.get("uz_model_path") or (uz_model_path(self.cfg) or ""))
+        uz_path.grid(row=11, column=1, **pad)
+
+        def browse():
+            from tkinter import filedialog
+            chosen = filedialog.askopenfilename(
+                parent=win, title="Файл модели whisper.cpp",
+                filetypes=[("Модель whisper.cpp", "*.bin"), ("Все файлы", "*.*")])
+            if chosen:
+                uz_path.delete(0, "end")
+                uz_path.insert(0, chosen)
+
+        tk.Button(win, text="Обзор…", command=browse).grid(row=11, column=0, **pad)
+
         tk.Label(win, text="Исправление текста", font=("", 10, "bold")).grid(row=6, column=0, columnspan=2, **pad)
         polish = tk.BooleanVar(value=bool(self.cfg.get("polish")))
         tk.Checkbutton(win, text="Исправлять ошибки и пунктуацию через Claude (+1–2 сек на фразу)",
@@ -1118,6 +1193,7 @@ class App:
             show_key()
             self.cfg["engine"] = engine.get()
             self.cfg.update(keys)
+            self.cfg["uz_model_path"] = uz_path.get().strip()
             self.cfg["polish"] = bool(polish.get())
             self.cfg["anthropic_api_key"] = ant_key.get().strip()
             save_config(self.cfg)
@@ -1125,7 +1201,7 @@ class App:
             self._restart()
 
         buttons = tk.Frame(win)
-        buttons.grid(row=9, column=0, columnspan=2, pady=10)
+        buttons.grid(row=12, column=0, columnspan=2, pady=10)
         tk.Button(buttons, text="Сохранить и перезапустить", command=save).pack(side="left", padx=6)
         tk.Button(buttons, text="Отмена", command=win.destroy).pack(side="left", padx=6)
         win.focus_force()
@@ -1155,15 +1231,25 @@ class App:
             log.exception("движок не загрузился")
             self.events.put(("error", f"Ошибка: {ex}", 30))
             return
+        if self.uz_engine is not None:
+            try:
+                self.uz_engine.load()
+                self.uz_ready = True
+                log.info("узбекская модель готова")
+            except Exception as ex:
+                log.exception("узбекская модель не загрузилась")
+                self.uz_engine = None
+                self.events.put(("error", f"UZ-модель: {ex}", 15))
         while True:
-            audio, session = self.jobs.get()
+            audio, session, engine = self.jobs.get()
             self.pending += 1
             try:
                 lang = self.cfg["language"]
                 if isinstance(audio, str):
                     text = clean_text(audio)
                 else:
-                    text = clean_text(self.engine.transcribe(audio, None if lang == "auto" else lang))
+                    engine = engine or self.engine
+                    text = clean_text(engine.transcribe(audio, None if lang == "auto" else lang))
                 if text and self.polisher:
                     try:
                         text = self.polisher.polish(text)
@@ -1228,6 +1314,12 @@ class App:
                     self._start()
                 else:
                     self._toggle_recording()
+            elif ev == "toggle_uz":
+                if self.cfg["language"] == "uz":
+                    self._set_lang(getattr(self, "lang_before_uz", "auto"))
+                else:
+                    self.lang_before_uz = self.cfg["language"]
+                    self._set_lang("uz")
             elif ev == "hotkey_up":
                 if self.cfg["hotkey_mode"] == "hold":
                     self._stop()
@@ -1248,9 +1340,12 @@ class App:
             color, status = COLORS["loading"], "Скачиваю модель…"
         elif not self.ready:
             color, status = COLORS["loading"], "Загрузка модели…"
+        elif self.cfg["language"] == "uz" and self.uz_engine is not None and not self.uz_ready \
+                and not self.recording:
+            color, status = COLORS["loading"], "Грузится UZ-модель…"
         elif self.recording:
             color, status = COLORS["rec"], "Слушаю…"
-            level = self.live_recorder.level if self.live else self.recorder.level
+            level = self.live_recorder.level if self.recording_live else self.recorder.level
             r = 15 + min(5.0, level * 120)
         elif self.pending or not self.jobs.empty():
             color, status = COLORS["busy"], "Распознаю…"

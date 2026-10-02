@@ -6,3 +6,4 @@ pyperclip>=1.8.2
 requests>=2.31
 anthropic>=1.0
 elevenlabs>=2.0
+pywhispercpp>=1.3
