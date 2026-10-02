@@ -280,6 +280,7 @@ class LocalEngine:
     def __init__(self, cfg):
         self.cfg = cfg
         self.model = None
+        self.downloading = False
 
     def load(self):
         from faster_whisper import WhisperModel
@@ -292,12 +293,18 @@ class LocalEngine:
                 device = "cpu"
         compute = "float16" if device == "cuda" else "int8"
         log.info("загружаю модель %s на %s (%s)", self.cfg["local_model"], device, compute)
-        self.model = WhisperModel(
-            self.cfg["local_model"],
-            device=device,
-            compute_type=compute,
-            download_root=os.path.join(APP_DIR, "models"),
-        )
+        opts = dict(device=device, compute_type=compute,
+                    download_root=os.path.join(APP_DIR, "models"))
+        try:
+            # Уже скачанная модель открывается с диска, интернет не нужен.
+            self.model = WhisperModel(self.cfg["local_model"], local_files_only=True, **opts)
+        except Exception:
+            log.info("модели нет на диске, скачиваю (один раз)")
+            self.downloading = True
+            try:
+                self.model = WhisperModel(self.cfg["local_model"], **opts)
+            finally:
+                self.downloading = False
 
     def transcribe(self, audio, lang):
         opts = dict(beam_size=5, vad_filter=True, condition_on_previous_text=False)
@@ -767,6 +774,8 @@ class App:
         r = 15
         if not self.enabled:
             color, status = COLORS["off"], "Выключено"
+        elif not self.ready and getattr(self.engine, "downloading", False):
+            color, status = COLORS["loading"], "Скачиваю модель…"
         elif not self.ready:
             color, status = COLORS["loading"], "Загрузка модели…"
         elif self.recording:
