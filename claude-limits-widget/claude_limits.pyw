@@ -34,7 +34,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "7"
+VERSION = "8"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
 CREDENTIALS = CLAUDE_DIR / ".credentials.json"
@@ -45,7 +45,7 @@ STALE_SECONDS = 900            # данные из Claude Code старше 15 �
 RATE_LIMIT_BACKOFF = 900
 WEB_URL = "https://claude.ai/api/organizations"
 WEB_INTERVAL = 120             # claude.ai спрашиваем раз в 2 минуты
-INSTANCE_PORT = 47853          # занятый порт = виджет уже запущен
+INSTANCE_PORT = 47853          # занятый порт = виджет уже запущен; стук в него = «покажись»
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
 LOG = Path.home() / ".claude_limits_widget.log"
@@ -381,9 +381,9 @@ class Widget:
         for child in w.winfo_children():
             yield from self.all_widgets(child)
 
-    def place_window(self):
+    def place_window(self, reset=False):
         self.root.update_idletasks()
-        x, y = self.settings.get("x"), self.settings.get("y")
+        x, y = (None, None) if reset else (self.settings.get("x"), self.settings.get("y"))
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         w, h = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
         if x is None or y is None or not (0 <= x < sw - 20 and 0 <= y < sh - 20):
@@ -414,6 +414,28 @@ class Widget:
                 row.reset.pack_forget()
             else:
                 row.reset.pack(anchor="w")
+
+    def listen_for_show(self, lock):
+        """Повторный запуск start.bat «стучится» сюда — возвращаем виджет в угол экрана."""
+        lock.listen()
+
+        def loop():
+            while True:
+                try:
+                    conn, _ = lock.accept()
+                    conn.close()
+                except OSError:
+                    return
+                self.root.after(0, self.bring_back)
+
+        threading.Thread(target=loop, daemon=True).start()
+
+    def bring_back(self):
+        self.root.deiconify()
+        self.place_window(reset=True)
+        self.root.attributes("-topmost", True)
+        self.root.lift()
+        self.save_position()
 
     def quit(self):
         self.save_position()
@@ -553,5 +575,12 @@ if __name__ == "__main__":
         try:
             lock.bind(("127.0.0.1", INSTANCE_PORT))
         except OSError:
-            sys.exit(0)  # виджет уже открыт — второй не запускаем
-        Widget().run()
+            # виджет уже открыт (возможно, уехал за край экрана) — просим его вернуться в угол
+            try:
+                socket.create_connection(("127.0.0.1", INSTANCE_PORT), timeout=2).close()
+            except OSError:
+                pass
+            sys.exit(0)
+        widget = Widget()
+        widget.listen_for_show(lock)
+        widget.run()
