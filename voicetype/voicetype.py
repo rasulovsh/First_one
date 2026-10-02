@@ -5,6 +5,8 @@
 каждая фраза распознаётся после паузы и вставляется туда, где стоит курсор.
 """
 
+import asyncio
+import base64
 import collections
 import io
 import json
@@ -30,6 +32,7 @@ SAMPLE_RATE = 16000
 CHUNK_SECONDS = 0.1
 
 DEFAULT_CONFIG = {
+    # elevenlabs — онлайн вживую: слова печатаются, пока вы говорите
     # local  — бесплатно, офлайн, без ключей (модель скачается один раз)
     # groq   — облако, очень быстро, бесплатный ключ на console.groq.com
     # openai — облако, лучшее качество, платный ключ platform.openai.com
@@ -47,6 +50,10 @@ DEFAULT_CONFIG = {
     "max_segment_seconds": 25,
     "min_volume": 0.006,
     "beam_size": 1,
+    "elevenlabs_api_key": "",
+    "live_model": "scribe_v2_realtime",
+    "live_silence_seconds": 0.6,
+    "live_typing": True,
     # Исправление текста через Claude после распознавания (нужен ключ Anthropic)
     "polish": False,
     "anthropic_api_key": "",
@@ -372,7 +379,206 @@ class CloudEngine:
         return r.json().get("text", "").strip()
 
 
+class ElevenLabsLive:
+    """ElevenLabs Scribe Realtime: звук идёт потоком, слова приходят по ходу речи."""
+
+    live = True
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.key = cfg.get("elevenlabs_api_key") or os.environ.get("ELEVENLABS_API_KEY", "")
+
+    def load(self):
+        if not self.key:
+            raise RuntimeError("нет ключа ElevenLabs (правый клик → Онлайн-распознавание)")
+        import elevenlabs.realtime  # noqa: F401 — проверяем, что библиотека установлена
+
+    def open(self, lang, on_partial, on_final, on_error):
+        return LiveSession(self.cfg, self.key, lang, on_partial, on_final, on_error)
+
+
+class LiveSession:
+    """Одна запись = одно WebSocket-соединение со своим asyncio-циклом в отдельном потоке."""
+
+    QUIET_ERRORS = ("insufficient_audio_activity", "commit_throttled")
+
+    def __init__(self, cfg, key, lang, on_partial, on_final, on_error):
+        self.cfg = cfg
+        self.key = key
+        self.lang = lang
+        self.on_partial = on_partial
+        self.on_final = on_final
+        self.on_error = on_error
+        self.stopping = False
+        self.loop = asyncio.new_event_loop()
+        self.queue = asyncio.Queue()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def feed(self, pcm):
+        self._put(pcm)
+
+    def stop(self):
+        self._put(None)
+
+    def _put(self, item):
+        try:
+            self.loop.call_soon_threadsafe(self.queue.put_nowait, item)
+        except RuntimeError:
+            pass  # соединение уже закрыто
+
+    def _run(self):
+        asyncio.set_event_loop(self.loop)
+        try:
+            self.loop.run_until_complete(self._main())
+        except Exception as ex:
+            log.exception("ошибка потокового распознавания")
+            self.on_error(str(ex))
+        finally:
+            self.loop.close()
+
+    def _options(self):
+        from elevenlabs.realtime import AudioFormat, CommitStrategy
+        opts = {
+            "model_id": self.cfg.get("live_model") or "scribe_v2_realtime",
+            "audio_format": AudioFormat.PCM_16000,
+            "sample_rate": SAMPLE_RATE,
+            "commit_strategy": CommitStrategy.VAD,
+            "vad_silence_threshold_secs": float(self.cfg.get("live_silence_seconds", 0.6)),
+            "no_verbatim": True,
+        }
+        if self.lang:
+            opts["language_code"] = self.lang
+        else:
+            langs = self.cfg.get("auto_languages") or []
+            if langs:
+                opts["language_code"] = langs[0]
+                if len(langs) > 1:
+                    opts["secondary_languages"] = list(langs[1:])
+        return opts
+
+    async def _main(self):
+        from elevenlabs.realtime import RealtimeEvents, ScribeRealtime
+        conn = await ScribeRealtime(api_key=self.key).connect(self._options())
+        done = asyncio.Event()
+
+        def committed(data):
+            self.on_final(data.get("text", ""))
+            if self.stopping:
+                done.set()
+
+        def error(data):
+            kind = data.get("message_type", "")
+            if self.stopping and kind in self.QUIET_ERRORS:
+                done.set()
+                return
+            if kind in self.QUIET_ERRORS:
+                return
+            self.on_error(data.get("error") or kind or "ошибка соединения")
+
+        conn.on(RealtimeEvents.PARTIAL_TRANSCRIPT, lambda data: self.on_partial(data.get("text", "")))
+        conn.on(RealtimeEvents.COMMITTED_TRANSCRIPT, committed)
+        conn.on(RealtimeEvents.ERROR, error)
+        conn.on(RealtimeEvents.CLOSE, lambda *a: done.set())
+
+        while True:
+            chunk = await self.queue.get()
+            if chunk is None:
+                break
+            await conn.send({"audio_base_64": base64.b64encode(chunk).decode("ascii")})
+
+        # Дожимаем последнюю фразу, которую VAD ещё не закрыл.
+        self.stopping = True
+        try:
+            await conn.commit()
+            await asyncio.wait_for(done.wait(), 3)
+        except Exception:
+            pass
+        await conn.close()
+
+
+class LiveRecorder:
+    """Отдаёт звук с микрофона кусками по 100 мс в формате PCM 16 кГц."""
+
+    def __init__(self):
+        self.stream = None
+        self.level = 0.0
+
+    def start(self, sink):
+        import sounddevice as sd
+
+        def callback(indata, frames, t, status):
+            mono = indata[:, 0]
+            self.level = float(np.sqrt(np.mean(mono ** 2)))
+            sink((np.clip(mono, -1, 1) * 32767).astype(np.int16).tobytes())
+
+        self.stream = sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="float32",
+            blocksize=int(SAMPLE_RATE * CHUNK_SECONDS),
+            callback=callback,
+        )
+        self.stream.start()
+
+    def stop(self):
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+        self.level = 0.0
+
+
+class LiveText:
+    """Помнит, что уже напечатано в текущей фразе, и считает минимальную правку.
+
+    Промежуточный текст печатается только словами, которые совпали в двух
+    подряд пришедших вариантах (кроме последнего, недоговорённого слова).
+    Если сервис потом поправил слово, стираем только напечатанное нами в этой фразе.
+    """
+
+    def __init__(self):
+        self.any_text = False
+        self._reset_segment()
+
+    def _reset_segment(self):
+        self.typed = ""
+        self.prev_words = []
+        self.sep = " " if self.any_text else ""
+
+    def partial(self, text):
+        words = text.split()
+        stable = []
+        for old, new in zip(self.prev_words, words[:-1]):
+            if old != new:
+                break
+            stable.append(new)
+        self.prev_words = words
+        if not stable:
+            return None
+        target = self.sep + " ".join(stable)
+        if self.typed.startswith(target):
+            return None
+        return self._diff(target)
+
+    def final(self, text):
+        text = clean_text(text)
+        action = self._diff(self.sep + text if text else "")
+        if text:
+            self.any_text = True
+        self._reset_segment()
+        return action
+
+    def _diff(self, target):
+        common = len(os.path.commonprefix([self.typed, target]))
+        delete = len(self.typed) - common
+        insert = target[common:]
+        self.typed = target
+        return (delete, insert) if delete or insert else None
+
+
 def make_engine(cfg):
+    if cfg["engine"] == "elevenlabs":
+        return ElevenLabsLive(cfg)
     if cfg["engine"] in CloudEngine.ENDPOINTS:
         return CloudEngine(cfg)
     return LocalEngine(cfg)
@@ -456,6 +662,16 @@ class Typer:
             except Exception:
                 pass
 
+    def type_text(self, text):
+        self.kb.type(text)
+
+    def backspace(self, count):
+        from pynput.keyboard import Key
+        for _ in range(count):
+            self.kb.press(Key.backspace)
+            self.kb.release(Key.backspace)
+            time.sleep(0.005)
+
 
 # ---------------------------------------------------------------- hotkey
 
@@ -531,7 +747,12 @@ class App:
             set_autostart(True)
 
         self.engine = make_engine(self.cfg)
+        self.live = getattr(self.engine, "live", False)
         self.recorder = Recorder(self.cfg, lambda seg, s: self.jobs.put((seg, s)))
+        self.live_recorder = LiveRecorder()
+        self.live_session = None
+        self.live_id = 0
+        self.out = queue.Queue()
         self.typer = Typer()
         self.polisher = None
         if self.cfg.get("polish"):
@@ -543,6 +764,8 @@ class App:
 
         self._build_window()
         threading.Thread(target=self._worker, daemon=True).start()
+        if self.live:
+            threading.Thread(target=self._live_output, daemon=True).start()
 
         self.hotkey = HotkeyListener(
             self.cfg["hotkey"],
@@ -622,17 +845,46 @@ class App:
         if IS_WIN:
             self._make_noactivate()
 
+    def _show_preview(self, text):
+        """Пузырь над виджетом: показывает слова, пока фраза ещё не готова."""
+        tk = self.tk
+        if not hasattr(self, "preview"):
+            self.preview = tk.Toplevel(self.root)
+            self.preview.overrideredirect(True)
+            self.preview.attributes("-topmost", True)
+            self.preview.attributes("-alpha", float(self.cfg["opacity"]))
+            self.preview_label = tk.Label(
+                self.preview, text="", bg=COLORS["bg"], fg=COLORS["text"],
+                wraplength=420, justify="left", padx=12, pady=8,
+            )
+            self.preview_label.pack()
+            self.preview.withdraw()
+            if IS_WIN:
+                self.preview.update_idletasks()
+                self._make_noactivate(self.preview)
+        if not text.strip():
+            self.preview.withdraw()
+            return
+        self.preview_label.config(text=text[-300:])
+        self.preview.update_idletasks()
+        w = self.preview.winfo_reqwidth()
+        h = self.preview.winfo_reqheight()
+        x = self.root.winfo_x() + self.W - w
+        y = self.root.winfo_y() - h - 8
+        self.preview.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.preview.deiconify()
+
     def _rounded(self, x1, y1, x2, y2, r, **kw):
         pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
                x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
         return self.canvas.create_polygon(pts, smooth=True, **kw)
 
-    def _make_noactivate(self):
+    def _make_noactivate(self, window=None):
         """Клик по виджету не забирает фокус у поля ввода, где стоит курсор."""
         try:
             import ctypes
             user32 = ctypes.windll.user32
-            hwnd = user32.GetParent(self.root.winfo_id())
+            hwnd = user32.GetParent((window or self.root).winfo_id())
             GWL_EXSTYLE = -20
             WS_EX_NOACTIVATE = 0x08000000
             WS_EX_TOOLWINDOW = 0x00000080
@@ -717,18 +969,55 @@ class App:
         if not self.ready:
             return self._flash("Модель ещё грузится…")
         try:
-            self.recorder.start()
+            if self.live:
+                self._start_live()
+            else:
+                self.recorder.start()
             self.recording = True
         except Exception as ex:
             log.exception("микрофон не открылся")
             self._flash(f"Микрофон: {ex}")
+
+    def _start_live(self):
+        self.live_id += 1
+        sid = self.live_id
+        lang = self.cfg["language"]
+        type_live = bool(self.cfg.get("live_typing", True)) and self.polisher is None
+
+        def on_partial(text):
+            if type_live:
+                self.out.put(("partial", text, sid))
+            else:
+                self.events.put(("preview", text))
+
+        def on_final(text):
+            if self.polisher is not None or not type_live:
+                self.events.put(("preview", ""))
+                if text.strip():
+                    self.jobs.put((text, sid))
+            else:
+                self.out.put(("final", text, sid))
+
+        def on_error(msg):
+            self.events.put(("error", f"ElevenLabs: {msg}", 8))
+
+        self.live_session = self.engine.open(
+            None if lang == "auto" else lang, on_partial, on_final, on_error
+        )
+        self.live_recorder.start(self.live_session.feed)
 
     def _stop(self):
         if not self.recording:
             return
         self.recording = False
         try:
-            self.recorder.stop()
+            if self.live:
+                self.live_recorder.stop()
+                if self.live_session is not None:
+                    self.live_session.stop()
+                    self.live_session = None
+            else:
+                self.recorder.stop()
         except Exception:
             log.exception("ошибка при остановке записи")
 
@@ -770,29 +1059,52 @@ class App:
         tk.Label(win, text="Распознавание речи", font=("", 10, "bold")).grid(row=0, column=0, columnspan=2, **pad)
         engine = tk.StringVar(value=self.cfg["engine"])
         choices = [
+            ("elevenlabs", "ElevenLabs — вживую: текст печатается, пока говорите"),
             ("local", "На компьютере (офлайн, бесплатно, медленнее)"),
             ("groq", "Groq — онлайн, очень быстро, бесплатный ключ"),
             ("openai", "OpenAI — онлайн, лучше всего со смесью языков, платно"),
         ]
         for i, (code, label) in enumerate(choices, start=1):
             tk.Radiobutton(win, text=label, value=code, variable=engine).grid(row=i, column=0, columnspan=2, **pad)
-        tk.Label(win, text="Ключ Groq / OpenAI:").grid(row=4, column=0, **pad)
+        key_names = {"elevenlabs": "elevenlabs_api_key", "groq": "api_key", "openai": "api_key"}
+        keys = {name: self.cfg.get(name, "") for name in set(key_names.values())}
+        key_label = tk.Label(win, text="")
+        key_label.grid(row=5, column=0, **pad)
         api_key = tk.Entry(win, width=46, show="•")
-        api_key.insert(0, self.cfg.get("api_key", ""))
-        api_key.grid(row=4, column=1, **pad)
+        api_key.grid(row=5, column=1, **pad)
+        shown = {"engine": None}
 
-        tk.Label(win, text="Исправление текста", font=("", 10, "bold")).grid(row=5, column=0, columnspan=2, **pad)
+        def show_key(*_):
+            if shown["engine"] in key_names:
+                keys[key_names[shown["engine"]]] = api_key.get().strip()
+            code = engine.get()
+            shown["engine"] = code
+            api_key.config(state="normal")
+            api_key.delete(0, "end")
+            if code in key_names:
+                key_label.config(text={"elevenlabs": "Ключ ElevenLabs:", "groq": "Ключ Groq:",
+                                       "openai": "Ключ OpenAI:"}[code])
+                api_key.insert(0, keys[key_names[code]])
+            else:
+                key_label.config(text="Ключ не нужен")
+                api_key.config(state="disabled")
+
+        engine.trace_add("write", show_key)
+        show_key()
+
+        tk.Label(win, text="Исправление текста", font=("", 10, "bold")).grid(row=6, column=0, columnspan=2, **pad)
         polish = tk.BooleanVar(value=bool(self.cfg.get("polish")))
-        tk.Checkbutton(win, text="Исправлять ошибки и пунктуацию через Claude (+1–2 сек)",
-                       variable=polish).grid(row=6, column=0, columnspan=2, **pad)
-        tk.Label(win, text="Ключ Anthropic:").grid(row=7, column=0, **pad)
+        tk.Checkbutton(win, text="Исправлять ошибки и пунктуацию через Claude (+1–2 сек на фразу)",
+                       variable=polish).grid(row=7, column=0, columnspan=2, **pad)
+        tk.Label(win, text="Ключ Anthropic:").grid(row=8, column=0, **pad)
         ant_key = tk.Entry(win, width=46, show="•")
         ant_key.insert(0, self.cfg.get("anthropic_api_key", ""))
-        ant_key.grid(row=7, column=1, **pad)
+        ant_key.grid(row=8, column=1, **pad)
 
         def save():
+            show_key()
             self.cfg["engine"] = engine.get()
-            self.cfg["api_key"] = api_key.get().strip()
+            self.cfg.update(keys)
             self.cfg["polish"] = bool(polish.get())
             self.cfg["anthropic_api_key"] = ant_key.get().strip()
             save_config(self.cfg)
@@ -800,7 +1112,7 @@ class App:
             self._restart()
 
         buttons = tk.Frame(win)
-        buttons.grid(row=8, column=0, columnspan=2, pady=10)
+        buttons.grid(row=9, column=0, columnspan=2, pady=10)
         tk.Button(buttons, text="Сохранить и перезапустить", command=save).pack(side="left", padx=6)
         tk.Button(buttons, text="Отмена", command=win.destroy).pack(side="left", padx=6)
         win.focus_force()
@@ -835,7 +1147,10 @@ class App:
             self.pending += 1
             try:
                 lang = self.cfg["language"]
-                text = clean_text(self.engine.transcribe(audio, None if lang == "auto" else lang))
+                if isinstance(audio, str):
+                    text = clean_text(audio)
+                else:
+                    text = clean_text(self.engine.transcribe(audio, None if lang == "auto" else lang))
                 if text and self.polisher:
                     try:
                         text = self.polisher.polish(text)
@@ -853,6 +1168,39 @@ class App:
                 self.events.put(("error", f"Ошибка: {ex}", 6))
             finally:
                 self.pending -= 1
+
+    def _live_output(self):
+        """Печатает слова вживую по мере того, как их присылает ElevenLabs."""
+        states = {}
+        while True:
+            ops = [self.out.get()]
+            while True:
+                try:
+                    ops.append(self.out.get_nowait())
+                except queue.Empty:
+                    break
+            collapsed = []
+            for op in ops:  # из подряд идущих промежуточных вариантов нужен только последний
+                if collapsed and op[0] == "partial" and collapsed[-1][0] == "partial" \
+                        and collapsed[-1][2] == op[2]:
+                    collapsed[-1] = op
+                else:
+                    collapsed.append(op)
+            for kind, text, sid in collapsed:
+                state = states.setdefault(sid, LiveText())
+                action = state.partial(text) if kind == "partial" else state.final(text)
+                if not action:
+                    continue
+                delete, insert = action
+                try:
+                    if delete:
+                        self.typer.backspace(delete)
+                    if insert:
+                        self.typer.type_text(insert)
+                except Exception:
+                    log.exception("не удалось напечатать текст")
+                if kind == "final":
+                    log.info("напечатано: %s", state.sep + text)
 
     # ------------------------------------------------------------ ui loop
 
@@ -872,6 +1220,8 @@ class App:
                     self._stop()
             elif isinstance(ev, tuple) and ev[0] == "error":
                 self._flash(ev[1], ev[2])
+            elif isinstance(ev, tuple) and ev[0] == "preview":
+                self._show_preview(ev[1])
         self._render()
         self.root.after(50, self._tick)
 
@@ -887,7 +1237,8 @@ class App:
             color, status = COLORS["loading"], "Загрузка модели…"
         elif self.recording:
             color, status = COLORS["rec"], "Слушаю…"
-            r = 15 + min(5.0, self.recorder.level * 120)
+            level = self.live_recorder.level if self.live else self.recorder.level
+            r = 15 + min(5.0, level * 120)
         elif self.pending or not self.jobs.empty():
             color, status = COLORS["busy"], "Распознаю…"
         else:
