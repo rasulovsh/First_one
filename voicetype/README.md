@@ -167,7 +167,7 @@
 | `polish_model` | `claude-opus-5-5` | модель Claude для исправления |
 | `live_silence_seconds` | `0.6` | пауза, после которой ElevenLabs закрывает фразу (0.3–3) |
 | `live_typing` | `true` | печатать слова вживую (ElevenLabs) |
-| `insert_method` | `type` | `type` — печатать текст, `paste` — вставлять через буфер обмена |
+| `insert_method` | `paste` | `paste` — вставлять фразу через буфер обмена (быстро), `type` — печатать по символу; переключается в меню |
 | `uz_model_path` | `""` | путь к узбекской модели whisper.cpp (.bin) |
 | `uz_hotkey` | `<f8>` | клавиша переключения UZ ↔ прежний язык |
 | `opacity` | `0.85` | прозрачность виджета (0.3–1.0) |

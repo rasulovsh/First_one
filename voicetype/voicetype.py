@@ -57,7 +57,8 @@ DEFAULT_CONFIG = {
     # Отдельная модель для узбекского (whisper.cpp, .bin), например rubaiSTT
     "uz_model_path": "",
     "uz_hotkey": "<f8>",
-    "insert_method": "type",
+    "insert_method": "paste",
+    "config_version": 2,
     # Исправление текста через Claude после распознавания (нужен ключ Anthropic)
     "polish": False,
     "anthropic_api_key": "",
@@ -100,13 +101,21 @@ log = logging.getLogger(APP_NAME)
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
+    stored = {}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, encoding="utf-8") as f:
-                cfg.update(json.load(f))
+                stored = json.load(f)
+            cfg.update(stored)
         except Exception:
             log.exception("config.json не читается, беру настройки по умолчанию")
     else:
+        save_config(cfg)
+    if stored and stored.get("config_version", 1) < 2:
+        # Вставка через буфер обмена снова по умолчанию: она быстрее и теперь работает
+        # при любой раскладке.
+        cfg["insert_method"] = "paste"
+        cfg["config_version"] = 2
         save_config(cfg)
     return cfg
 
@@ -401,7 +410,7 @@ class WhisperCppEngine:
         threads = max(1, min(8, os.cpu_count() or 4))
         log.info("загружаю whisper.cpp модель %s (%d потоков)", self.path, threads)
         self.model = Model(self.path, n_threads=threads, print_progress=False,
-                           print_realtime=False, print_timestamps=False)
+                           print_realtime=False, print_timestamps=False, no_timestamps=True)
 
     def transcribe(self, audio, lang):
         lang = lang or "uz"
@@ -688,7 +697,7 @@ class Typer:
         except Exception:
             old = None
         pyperclip.copy(text)
-        time.sleep(0.05)
+        time.sleep(0.03)
         from pynput.keyboard import KeyCode
         mod = Key.cmd if IS_MAC else Key.ctrl
         # На Windows жмём клавишу V по коду, иначе при русской раскладке Ctrl+V не срабатывает.
@@ -696,7 +705,7 @@ class Typer:
         with self.kb.pressed(mod):
             self.kb.press(v)
             self.kb.release(v)
-        time.sleep(0.3)
+        time.sleep(0.2)  # даём программе забрать текст, потом возвращаем старый буфер
         if old is not None:
             try:
                 pyperclip.copy(old)
@@ -706,7 +715,7 @@ class Typer:
     def type_text(self, text):
         self.kb.type(text)
 
-    def insert(self, text, method="type"):
+    def insert(self, text, method="paste"):
         if method == "paste":
             self.paste(text)
         else:
@@ -975,6 +984,12 @@ class App:
         m.add_radiobutton(label=f"{key}: говорю, пока держу", value="hold",
                           variable=self.mode_var, command=self._set_mode)
         m.add_separator()
+        self.insert_var = tk.StringVar(value=self.cfg.get("insert_method", "paste"))
+        m.add_radiobutton(label="Вставлять фразу через буфер обмена (быстро)", value="paste",
+                          variable=self.insert_var, command=self._set_insert)
+        m.add_radiobutton(label="Печатать фразу по символу (медленнее)", value="type",
+                          variable=self.insert_var, command=self._set_insert)
+        m.add_separator()
         m.add_checkbutton(label="Запускать вместе с системой", variable=self.auto_var,
                           command=self._set_autostart)
         m.add_command(label="Онлайн-распознавание и Claude…", command=self._open_settings)
@@ -1095,6 +1110,10 @@ class App:
     def _set_lang(self, code):
         self.cfg["language"] = code
         self.lang_var.set(code)
+        save_config(self.cfg)
+
+    def _set_insert(self):
+        self.cfg["insert_method"] = self.insert_var.get()
         save_config(self.cfg)
 
     def _set_mode(self):
@@ -1243,25 +1262,33 @@ class App:
         while True:
             audio, session, engine = self.jobs.get()
             self.pending += 1
+            timings = []
             try:
                 lang = self.cfg["language"]
                 if isinstance(audio, str):
                     text = clean_text(audio)
                 else:
                     engine = engine or self.engine
+                    t_rec = time.time()
                     text = clean_text(engine.transcribe(audio, None if lang == "auto" else lang))
+                    timings.append(f"фраза {len(audio) / SAMPLE_RATE:.1f}с, "
+                                   f"распознавание {time.time() - t_rec:.2f}с")
                 if text and self.polisher:
                     try:
+                        t_pol = time.time()
                         text = self.polisher.polish(text)
+                        timings.append(f"Claude {time.time() - t_pol:.2f}с")
                     except Exception as ex:
                         log.exception("Claude не исправил текст, вставляю как есть")
                         self.events.put(("error", f"Claude: {ex}", 6))
                 if text:
                     if self.last_session_pasted == session:
                         text = " " + text
-                    self.typer.insert(text, self.cfg.get("insert_method", "type"))
+                    t_insert = time.time()
+                    self.typer.insert(text, self.cfg.get("insert_method", "paste"))
+                    timings.append(f"вставка {time.time() - t_insert:.2f}с")
                     self.last_session_pasted = session
-                    log.info("вставлено: %s", text)
+                    log.info("вставлено (%s): %s", ", ".join(timings), text)
             except Exception as ex:
                 log.exception("ошибка распознавания")
                 self.events.put(("error", f"Ошибка: {ex}", 6))
