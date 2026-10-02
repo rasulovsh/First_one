@@ -26,6 +26,8 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.abspath(__file__)
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 LOG_PATH = os.path.join(APP_DIR, "voicetype.log")
+ICON_PATH = os.path.join(APP_DIR, "voicetype.ico")
+IPC_PORT = 47613  # второй запуск просит уже открытый виджет показаться
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 SAMPLE_RATE = 16000
@@ -64,6 +66,7 @@ DEFAULT_CONFIG = {
     "anthropic_api_key": "",
     "polish_model": "claude-opus-5-5",
     "autostart": True,
+    "shortcuts_created": False,
     "position": None,
 }
 
@@ -766,6 +769,145 @@ def hotkey_label(combo):
     return "+".join(p.strip("<>").upper() for p in combo.split("+"))
 
 
+# ---------------------------------------------------------------- icon, shortcuts
+
+def make_icon_image(recording=False, size=64):
+    """Значок: круг с микрофоном; красный, пока идёт запись."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    k = size / 64
+    d.ellipse((2 * k, 2 * k, 62 * k, 62 * k), fill="#e5484d" if recording else "#2b2e36")
+    d.rounded_rectangle((25 * k, 13 * k, 39 * k, 37 * k), radius=7 * k, fill="white")
+    d.arc((18 * k, 22 * k, 46 * k, 44 * k), start=0, end=180, fill="white", width=max(1, int(3 * k)))
+    d.line((32 * k, 44 * k, 32 * k, 51 * k), fill="white", width=max(1, int(3 * k)))
+    d.line((25 * k, 51 * k, 39 * k, 51 * k), fill="white", width=max(1, int(3 * k)))
+    return img
+
+
+def ensure_icon_file():
+    if not os.path.exists(ICON_PATH):
+        make_icon_image(size=256).save(ICON_PATH, sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+    return ICON_PATH
+
+
+def create_shortcuts():
+    """Ярлык VoiceType на рабочем столе и в меню «Пуск» (Windows)."""
+    if not IS_WIN:
+        return False
+    icon = ensure_icon_file()
+
+    def ps_quote(value):
+        return "'" + value.replace("'", "''") + "'"
+
+    script = "; ".join(
+        f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut("
+        f"(Join-Path ([Environment]::GetFolderPath('{folder}')) 'VoiceType.lnk')); "
+        f"$s.TargetPath = {ps_quote(_pythonw())}; "
+        f"$s.Arguments = {ps_quote(chr(34) + SCRIPT_PATH + chr(34))}; "
+        f"$s.WorkingDirectory = {ps_quote(APP_DIR)}; "
+        f"$s.IconLocation = {ps_quote(icon)}; "
+        f"$s.Description = 'VoiceType — голосовой ввод'; $s.Save()"
+        for folder in ("Desktop", "Programs")
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True, text=True, creationflags=0x08000000,  # CREATE_NO_WINDOW
+    )
+    if result.returncode != 0:
+        log.error("ярлык не создан: %s", result.stderr.strip())
+    return result.returncode == 0
+
+
+def virtual_screen(root):
+    """Границы всех мониторов вместе: (x, y, ширина, высота)."""
+    if IS_WIN:
+        try:
+            import ctypes
+            m = ctypes.windll.user32.GetSystemMetrics
+            return m(76), m(77), m(78), m(79)
+        except Exception:
+            pass
+    return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+
+
+class Tray:
+    """Значок в области уведомлений (трее) с меню."""
+
+    def __init__(self, app):
+        import pystray
+        self.app = app
+        self.recording = False
+        self.images = {False: make_icon_image(False), True: make_icon_image(True)}
+        put = app.events.put
+        names = {"auto": "Авто", "ru": "Русский", "en": "English", "uz": "O'zbekcha"}
+
+        def lang_item(code):
+            return pystray.MenuItem(
+                names[code], lambda icon, item: put(("lang", code)),
+                checked=lambda item: app.cfg["language"] == code, radio=True,
+            )
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Показать виджет", lambda icon, item: put("show"), default=True),
+            pystray.MenuItem(
+                lambda item: "Остановить запись" if app.recording else "Начать запись",
+                lambda icon, item: put("toggle_rec"),
+            ),
+            pystray.MenuItem("Включён", lambda icon, item: put("toggle_enabled"),
+                             checked=lambda item: app.enabled),
+            pystray.MenuItem("Язык", pystray.Menu(*[lang_item(c) for c in LANGS])),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Онлайн-распознавание и Claude…", lambda icon, item: put("settings")),
+            pystray.MenuItem("Создать ярлык на рабочем столе", lambda icon, item: put("shortcut")),
+            pystray.MenuItem("Перезапустить", lambda icon, item: put("restart")),
+            pystray.MenuItem("Выход", lambda icon, item: put("quit")),
+        )
+        self.icon = pystray.Icon(APP_NAME, self.images[False], "VoiceType", menu)
+        self.icon.run_detached()
+
+    def set_recording(self, value):
+        if value != self.recording:
+            self.recording = value
+            self.icon.icon = self.images[value]
+
+    def stop(self):
+        try:
+            self.icon.stop()
+        except Exception:
+            pass
+
+
+def start_ipc_server(events):
+    """Слушает локальный порт: второй запуск присылает «show»."""
+    import socket
+
+    def serve():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            srv.bind(("127.0.0.1", IPC_PORT))
+        except OSError:
+            log.warning("порт %d занят, повторный запуск не сможет показать виджет", IPC_PORT)
+            return
+        srv.listen(1)
+        while True:
+            conn, _ = srv.accept()
+            with conn:
+                if conn.recv(16).startswith(b"show"):
+                    events.put("show")
+
+    threading.Thread(target=serve, daemon=True).start()
+
+
+def ask_running_instance_to_show():
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", IPC_PORT), timeout=1) as conn:
+            conn.sendall(b"show")
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------- app
 
 COLORS = {
@@ -849,6 +991,15 @@ class App:
                 log.exception("клавиша переключения UZ не назначилась")
         self.root.after(50, self._tick)
         self.root.after(3000, self._keep_on_top)
+        self.root.report_callback_exception = self._report_tk_error
+        start_ipc_server(self.events)
+        self.tray = None
+        try:
+            self.tray = Tray(self)
+        except Exception:
+            log.exception("значок в трее не создан")
+        if IS_WIN and not self.cfg.get("shortcuts_created"):
+            threading.Thread(target=self._create_shortcuts, daemon=True).start()
         if getattr(self, "_flash_later", None):
             self._flash(self._flash_later, 10)
 
@@ -874,12 +1025,8 @@ class App:
             root.attributes("-transparentcolor", key)
             bg = key
 
-        pos = self.cfg.get("position")
-        if not pos:
-            sw = root.winfo_screenwidth()
-            sh = root.winfo_screenheight()
-            pos = [sw - self.W - 40, sh - self.H - 90]
-        root.geometry(f"{self.W}x{self.H}+{int(pos[0])}+{int(pos[1])}")
+        pos = self._visible_position(self.cfg.get("position"))
+        root.geometry(f"{self.W}x{self.H}+{pos[0]}+{pos[1]}")
 
         c = self.canvas = tk.Canvas(root, width=self.W, height=self.H, bg=bg, highlightthickness=0)
         c.pack()
@@ -994,6 +1141,7 @@ class App:
                           command=self._set_autostart)
         m.add_command(label="Онлайн-распознавание и Claude…", command=self._open_settings)
         m.add_command(label="Настройки (config.json)…", command=self._open_config)
+        m.add_command(label="Создать ярлык на рабочем столе", command=lambda: self.events.put("shortcut"))
         m.add_command(label="Перезапустить", command=self._restart)
         m.add_separator()
         m.add_command(label="Выход", command=self._quit)
@@ -1232,6 +1380,8 @@ class App:
 
     def _quit(self):
         self._stop()
+        if self.tray is not None:
+            self.tray.stop()
         self.root.destroy()
         os._exit(0)
 
@@ -1341,6 +1491,23 @@ class App:
                     self._start()
                 else:
                     self._toggle_recording()
+            elif ev == "show":
+                self._show_widget()
+            elif ev == "toggle_rec":
+                self._toggle_recording()
+            elif ev == "toggle_enabled":
+                self._set_enabled(not self.enabled)
+            elif ev == "settings":
+                self._open_settings()
+            elif ev == "shortcut":
+                self.cfg["shortcuts_created"] = False
+                threading.Thread(target=self._create_shortcuts, daemon=True).start()
+            elif ev == "restart":
+                self._restart()
+            elif ev == "quit":
+                self._quit()
+            elif isinstance(ev, tuple) and ev[0] == "lang":
+                self._set_lang(ev[1])
             elif ev == "toggle_uz":
                 if self.cfg["language"] == "uz":
                     self._set_lang(getattr(self, "lang_before_uz", "auto"))
@@ -1381,6 +1548,8 @@ class App:
         if self.error and time.time() < self.error_until:
             status = self.error
         c.itemconfig(self.mic, fill=color)
+        if self.tray is not None:
+            self.tray.set_recording(self.recording)
         c.coords(self.mic, cx - r, cy - r, cx + r, cy + r)
         lang = self.cfg["language"]
         c.itemconfig(self.lang_text, text="AUTO" if lang == "auto" else lang.upper())
@@ -1390,9 +1559,48 @@ class App:
         c.itemconfig(self.power_line, fill=pcolor)
 
     def _keep_on_top(self):
+        try:
+            if self.root.state() != "normal":  # свернули, например, по Win+D
+                self.root.deiconify()
+            x, y = self.root.winfo_x(), self.root.winfo_y()
+            if (x, y) != tuple(self._visible_position([x, y])):
+                self._show_widget()
+            self.root.attributes("-topmost", True)
+            self.root.lift()
+        except Exception:
+            log.exception("не удалось удержать виджет поверх окон")
+        self.root.after(3000, self._keep_on_top)
+
+    def _visible_position(self, pos):
+        """Возвращает позицию в пределах экранов; без позиции — правый нижний угол."""
+        vx, vy, vw, vh = virtual_screen(self.root)
+        if not pos:
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            return [sw - self.W - 40, sh - self.H - 90]
+        x = min(max(int(pos[0]), vx), vx + vw - self.W)
+        y = min(max(int(pos[1]), vy), vy + vh - self.H)
+        return [x, y]
+
+    def _show_widget(self):
+        pos = self._visible_position(self.cfg.get("position"))
+        self.root.deiconify()
+        self.root.geometry(f"+{pos[0]}+{pos[1]}")
         self.root.attributes("-topmost", True)
         self.root.lift()
-        self.root.after(3000, self._keep_on_top)
+        if pos != self.cfg.get("position"):
+            self.cfg["position"] = pos
+            save_config(self.cfg)
+
+    def _create_shortcuts(self):
+        if create_shortcuts():
+            self.cfg["shortcuts_created"] = True
+            save_config(self.cfg)
+            self.events.put(("error", "Ярлык VoiceType создан на рабочем столе", 5))
+        else:
+            self.events.put(("error", "Ярлык не создан — см. voicetype.log", 6))
+
+    def _report_tk_error(self, exc, value, tb):
+        log.error("ошибка в интерфейсе", exc_info=(exc, value, tb))
 
     def run(self):
         self.root.mainloop()
@@ -1420,7 +1628,16 @@ def release_single_instance():
         _mutex = None
 
 
+def _log_crash(exc, value, tb):
+    log.critical("программа упала", exc_info=(exc, value, tb))
+
+
 if __name__ == "__main__":
+    sys.excepthook = _log_crash
+    threading.excepthook = lambda a: log.error(
+        "ошибка в потоке %s", a.thread.name if a.thread else "?",
+        exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
     if not acquire_single_instance():
+        ask_running_instance_to_show()
         sys.exit(0)
     App().run()

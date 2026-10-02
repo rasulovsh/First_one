@@ -3,3 +3,4 @@ models/
 config.json
 voicetype.log
 __pycache__/
+voicetype.ico
