@@ -1,0 +1,5 @@
+.venv/
+models/
+config.json
+voicetype.log
+__pycache__/
