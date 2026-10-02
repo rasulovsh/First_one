@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
     "live_model": "scribe_v2_realtime",
     "live_silence_seconds": 0.6,
     "live_typing": True,
+    "insert_method": "type",
     # Исправление текста через Claude после распознавания (нужен ключ Anthropic)
     "polish": False,
     "anthropic_api_key": "",
@@ -651,10 +652,13 @@ class Typer:
             old = None
         pyperclip.copy(text)
         time.sleep(0.05)
+        from pynput.keyboard import KeyCode
         mod = Key.cmd if IS_MAC else Key.ctrl
+        # На Windows жмём клавишу V по коду, иначе при русской раскладке Ctrl+V не срабатывает.
+        v = KeyCode.from_vk(0x56) if IS_WIN else "v"
         with self.kb.pressed(mod):
-            self.kb.press("v")
-            self.kb.release("v")
+            self.kb.press(v)
+            self.kb.release(v)
         time.sleep(0.3)
         if old is not None:
             try:
@@ -664,6 +668,12 @@ class Typer:
 
     def type_text(self, text):
         self.kb.type(text)
+
+    def insert(self, text, method="type"):
+        if method == "paste":
+            self.paste(text)
+        else:
+            self.type_text(text)
 
     def backspace(self, count):
         from pynput.keyboard import Key
@@ -755,7 +765,10 @@ class App:
         self.out = queue.Queue()
         self.typer = Typer()
         self.polisher = None
-        if self.cfg.get("polish"):
+        has_key = self.cfg.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
+        if self.cfg.get("polish") and not has_key:
+            self._flash_later = "Нет ключа Anthropic — Claude выключен"
+        elif self.cfg.get("polish"):
             try:
                 self.polisher = ClaudePolisher(self.cfg)
             except Exception as ex:
@@ -1160,7 +1173,7 @@ class App:
                 if text:
                     if self.last_session_pasted == session:
                         text = " " + text
-                    self.typer.paste(text)
+                    self.typer.insert(text, self.cfg.get("insert_method", "type"))
                     self.last_session_pasted = session
                     log.info("вставлено: %s", text)
             except Exception as ex:
