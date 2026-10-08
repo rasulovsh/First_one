@@ -52,7 +52,7 @@ window.SITE = {
     bio: {
       ru: [
         "Шохрух Расулов — основатель киностудии Spectre Studio, режиссёр и продюсер. С 2019 года снимает документальное и игровое кино: портреты больших имён узбекской культуры, истории людей, которые служат своей стране, и художественные фильмы для широкого зрителя.",
-        "Среди работ — документальные фильмы «Алишер Навоий» и «Абдулла Орипов», «Чиланзар: Душа столицы», игровые картины «Бир кунлик туй» и «Уч Кахрамон». В 2025 году студия выпустила документальный цикл «Whispers of Wisdom» с участием лауреата премии «Оскар» Бена Кингсли.",
+        "Среди работ — документальные фильмы «Алишер Навоий» и «Абдулла Орипов», «Чиланзар: Душа столицы», игровые картины «Бир кунлик туй» и «Уч Кахрамон». В 2025 году студия выпустила документальный цикл «Эхо просвещения» (Whispers of Wisdom) с участием лауреата премии «Оскар» Бена Кингсли.",
         "Сейчас в производстве — художественный фильм «Хошимов» совместно с киноконцерном «Узбекфильм»."
       ],
       uz: [
@@ -80,6 +80,7 @@ window.SITE = {
     cisc:       { ru: "Центр исламской цивилизации в Узбекистане", uz: "O'zbekistondagi Islom sivilizatsiyasi markazi", en: "Center for Islamic Civilization in Uzbekistan" },
     chilanzar:  { ru: "Хокимият Чиланзарского района", uz: "Chilonzor tumani hokimligi", en: "Chilanzar District Administration" },
     tiiame:     { ru: "НИУ «Ташкентский институт инженеров ирригации и механизации сельского хозяйства»", uz: "«Toshkent irrigatsiya va qishloq xo'jaligini mexanizatsiyalash muhandislari instituti» MTU", en: "TIIAME National Research University" },
+    cec:        { ru: "Центральная избирательная комиссия Республики Узбекистан", uz: "O'zbekiston Respublikasi Markaziy saylov komissiyasi", en: "Central Election Commission of the Republic of Uzbekistan" },
     milliy:     { ru: "Демократическая партия «Миллий тикланиш»", uz: "«Milliy tiklanish» demokratik partiyasi", en: "Milliy Tiklanish Democratic Party" }
   },
 
@@ -93,7 +94,7 @@ window.SITE = {
     },
     {
       id: "whispers-of-wisdom", year: 2025, type: "series", featured: true,
-      title: { ru: "Whispers of Wisdom", uz: "Whispers of Wisdom", en: "Whispers of Wisdom" },
+      title: { ru: "Эхо просвещения", uz: "Whispers of Wisdom", en: "Whispers of Wisdom" },
       note: {
         ru: "С участием лауреата премии «Оскар» сэра Бена Кингсли",
         uz: "«Oskar» mukofoti sohibi ser Ben Kingsli ishtirokida",
@@ -127,7 +128,7 @@ window.SITE = {
       },
       video: { file: "assets/video/referendum.mp4" },
       still: "assets/img/stills/referendum.jpg",
-      clients: []
+      clients: ["cec"]
     },
     {
       id: "evakuatsiya", year: 2023, type: "doc",
@@ -192,7 +193,7 @@ window.SITE = {
       title: { ru: "Адиблар хиёбони", uz: "Adiblar xiyoboni", en: "Writers' Alley" },
       video: { file: "assets/video/adiblar-xiyoboni.mp4" },
       still: "assets/img/stills/adiblar-xiyoboni.jpg",
-      clients: []
+      clients: ["cinema"]
     },
     {
       id: "xalq-yuragi", year: 2020, type: "doc",
