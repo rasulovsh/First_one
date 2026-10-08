@@ -31,13 +31,11 @@ window.SITE = {
 
   founded: 2020,
 
-  // ДЕМО-контакты — заменить на настоящие
   contacts: {
-    email: "hello@spectrestudio.uz",
-    phone: "+998 90 000 00 00",
-    telegram: "spectrestudio",
+    email: "rasulov.sh92@gmail.com",
+    phone: "+998 99 798 69 87",
+    telegram: "Rasulov_Shokhrukh",
     instagram: "spectrestudio",
-    youtube: "https://www.youtube.com/@spectrestudio",
     city: { ru: "Ташкент, Узбекистан", uz: "Toshkent, O'zbekiston", en: "Tashkent, Uzbekistan" }
   },
 

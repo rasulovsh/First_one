@@ -603,7 +603,7 @@ h1, h2, h3, p { margin: 0; }
 /* ---------- Контакты ---------- */
 .contacts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
 }
@@ -616,7 +616,12 @@ h1, h2, h3, p { margin: 0; }
 }
 a.contact:hover { background: var(--bg-2); }
 .contact .mono { color: var(--muted); display: block; margin-bottom: 16px; }
-.contact__value { font-size: clamp(19px, 2vw, 24px); font-weight: 300; overflow-wrap: anywhere; }
+.contact__value { font-size: clamp(19px, 2vw, 24px); font-weight: 300; overflow-wrap: break-word; }
+.contact:first-child { grid-column: span 2; }
+@media (max-width: 860px) {
+  .contacts { grid-template-columns: 1fr; }
+  .contact:first-child { grid-column: auto; }
+}
 
 /* ---------- Подвал ---------- */
 .footer { border-top: 1px solid var(--line); padding: 56px 0 40px; }
