@@ -83,7 +83,7 @@ window.SITE = {
   },
 
   // Избранное на главной — в этом порядке
-  featured: ["hoshimov", "uch-qahramon", "imom-al-buxoriy", "vijdon-saratoni", "abdulla-oripov", "whispers-of-wisdom"],
+  featured: ["hoshimov", "uch-qahramon", "whispers-of-wisdom", "vijdon-saratoni", "imom-al-buxoriy", "abdulla-oripov"],
 
   // type: feature | doc | series | promo
   // Порядок здесь = порядок на странице «Работы» (сначала новые).
