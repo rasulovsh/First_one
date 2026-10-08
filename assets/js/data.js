@@ -102,7 +102,7 @@ window.SITE = {
         en: "Featuring Academy Award winner Sir Ben Kingsley"
       },
       video: { file: "assets/video/whispers-of-wisdom.mp4" },
-      still: "assets/img/stills/whispers-of-wisdom.jpg",
+      still: "assets/img/stills/whispers-of-wisdom.jpg?v=3",
       clients: ["cisc"]
     },
     {
@@ -134,6 +134,8 @@ window.SITE = {
     {
       id: "evakuatsiya", year: 2023, type: "doc",
       title: { ru: "Эвакуация", uz: "Evakuatsiya", en: "Evacuation" },
+      video: { file: "assets/video/evakuatsiya.mp4" },
+      still: "assets/img/stills/evakuatsiya.jpg",
       clients: ["cinema", "docstudio"]
     },
     {
