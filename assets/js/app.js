@@ -105,10 +105,15 @@
       if (p.type === "feature") features++;
       if (p.type === "doc" || p.type === "series") docs++;
     });
+    // Не все работы показаны на сайте: итоговые цифры можно задать в SITE.totals
+    var totals = SITE.totals || {};
+    var docsTotal = Math.max(docs, totals.docs || 0);
+    var featuresTotal = Math.max(features, totals.features || 0);
+    var hidden = (docsTotal - docs) + (featuresTotal - features);
     return [
-      [projects.length, t("stats.projects")],
-      [features, t("stats.features")],
-      [docs, t("stats.docs")],
+      [projects.length + hidden, t("stats.projects")],
+      [featuresTotal, t("stats.features")],
+      [docsTotal, t("stats.docs")],
       [Object.keys(SITE.clients).length, t("stats.clients")]
     ];
   }

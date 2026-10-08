@@ -31,6 +31,10 @@ window.SITE = {
 
   founded: 2020,
 
+  // Итоговые цифры на сайте. На сайте показаны не все работы —
+  // недостающие прибавляются к общему числу проектов.
+  totals: { docs: 26 },
+
   contacts: {
     email: "rasulov.sh92@gmail.com",
     phone: "+998 99 798 69 87",
@@ -137,6 +141,7 @@ window.SITE = {
       title: { ru: "Эвакуация", uz: "Evakuatsiya", en: "Evacuation" },
       video: { file: "assets/video/evakuatsiya.mp4" },
       still: "assets/img/stills/evakuatsiya.jpg",
+      poster: "assets/img/posters/evakuatsiya.jpg",
       clients: ["cinema", "docstudio"]
     },
     {
