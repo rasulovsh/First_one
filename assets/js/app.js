@@ -259,7 +259,7 @@
     var media = reel && reel.file
       ? '<video src="' + esc(reel.file) + '" autoplay muted loop playsinline></video>'
       : '<div class="hero__beam"></div>';
-    var reelBtn = reel && embedURL(reel)
+    var reelBtn = reel && (reel.file || embedURL(reel))
       ? '<button type="button" class="btn" data-reel><i class="play-icon"></i>' + t("hero.cta.reel") + "</button>"
       : "";
     var featured = projects.filter(function (p) { return p.featured; });
@@ -533,14 +533,19 @@
   }
 
   function openReel() {
-    var src = embedURL(SITE.showreel);
-    if (!src) return;
+    var reel = SITE.showreel;
+    if (!reel) return;
+    var src = embedURL(reel);
+    var player = reel.file
+      ? '<video src="' + esc(reel.file) + '" controls autoplay playsinline style="width:100%;height:100%"></video>'
+      : src ? iframeHTML(src, "Spectre Studio — Showreel", true) : null;
+    if (!player) return;
     var modal = document.createElement("div");
     modal.className = "modal";
     modal.setAttribute("role", "dialog");
     modal.setAttribute("aria-modal", "true");
     modal.innerHTML = '<button type="button" class="modal__close mono">' + t("nav.close") + ' ✕</button>' +
-      '<div class="modal__inner"><div class="player">' + iframeHTML(src, "Spectre Studio — Showreel", true) + "</div></div>";
+      '<div class="modal__inner"><div class="player">' + player + "</div></div>";
     document.body.appendChild(modal);
     requestAnimationFrame(function () { modal.classList.add("is-open"); });
     function close() {
