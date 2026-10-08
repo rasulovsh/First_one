@@ -91,6 +91,7 @@ window.SITE = {
     {
       id: "hoshimov", year: 2026, type: "feature", status: "production",
       title: { ru: "Хошимов", uz: "Hoshimov", en: "Hoshimov" },
+      poster: "assets/img/posters/hoshimov.jpg",
       clients: ["cinema", "uzbekfilm"]
     },
     {
@@ -163,6 +164,9 @@ window.SITE = {
     {
       id: "bir-kunlik-toy", year: 2021, type: "feature",
       title: { ru: "Бир кунлик туй", uz: "Bir kunlik to'y", en: "A One-Day Wedding" },
+      poster: "assets/img/posters/bir-kunlik-toy.jpg",
+      video: { file: "assets/video/bir-kunlik-toy.mp4" },
+      still: "assets/img/stills/bir-kunlik-toy.jpg",
       clients: ["cinema"]
     },
     {
@@ -175,7 +179,8 @@ window.SITE = {
     {
       id: "inson", year: 2021, type: "doc",
       title: { ru: "Инсон", uz: "Inson", en: "Human" },
-      clients: ["cinema"]
+      poster: "assets/img/posters/inson.jpg",
+      clients: ["cinema", "sgb"]
     },
     {
       id: "abdulla-oripov", year: 2021, type: "doc",

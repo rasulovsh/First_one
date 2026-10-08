@@ -359,6 +359,11 @@
           (p.still ? ' poster="' + esc(p.still) + '"' : "") + "></video>"
       : src
       ? iframeHTML(src, L(p.title))
+      : p.poster
+      ? '<div class="player__poster" style="background-image:url(\'' + esc(p.poster) + '\')">' +
+          '<img src="' + esc(p.poster) + '" alt="' + esc(L(p.title)) + '">' +
+          '<div class="player__corner player__corner--tl mono">' + (p.status === "production" ? '<span class="rec-dot"></span>' + t("work.noVideoProduction") : t("work.noVideo")) + "</div>" +
+        "</div>"
       : '<div class="player__empty">' +
           '<div class="player__corner player__corner--tl mono">' + (p.status === "production" ? '<span class="rec-dot"></span>' : "") + esc(L(p.title)) + "</div>" +
           '<div class="player__corner player__corner--br mono">' + p.year + " · Spectre Studio</div>" +
