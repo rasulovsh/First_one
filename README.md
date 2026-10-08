@@ -31,3 +31,12 @@ python3 -m http.server 8000
 ## Публикация на GitHub Pages
 
 Settings → Pages → Source: «Deploy from a branch» → ветка с сайтом, папка `/ (root)`.
+
+## После правок
+
+Браузеры (особенно на телефонах) запоминают старые файлы. После изменения `data.js`, `i18n.js`, `app.js` или `style.css`
+обновите номер версии `?v=...` в подключениях во всех `*.html`, например:
+
+```bash
+V=$(date +%Y%m%d%H%M); sed -i -E "s#(assets/(css/style\.css|js/(data|i18n|app)\.js))(\?v=[0-9]+)?\"#\1?v=$V\"#g" *.html
+```
