@@ -82,16 +82,19 @@ window.SITE = {
     milliy:     { ru: "Демократическая партия «Миллий тикланиш»", uz: "«Milliy tiklanish» demokratik partiyasi", en: "Milliy Tiklanish Democratic Party" }
   },
 
+  // Избранное на главной — в этом порядке
+  featured: ["hoshimov", "uch-qahramon", "imom-al-buxoriy", "vijdon-saratoni", "abdulla-oripov", "whispers-of-wisdom"],
+
   // type: feature | doc | series | promo
   // Порядок здесь = порядок на странице «Работы» (сначала новые).
   projects: [
     {
-      id: "hoshimov", year: 2026, type: "feature", status: "production", featured: true,
+      id: "hoshimov", year: 2026, type: "feature", status: "production",
       title: { ru: "Хошимов", uz: "Hoshimov", en: "Hoshimov" },
       clients: ["cinema", "uzbekfilm"]
     },
     {
-      id: "whispers-of-wisdom", year: 2025, type: "series", featured: true,
+      id: "whispers-of-wisdom", year: 2025, type: "series",
       title: { ru: "Эхо просвещения", uz: "Whispers of Wisdom", en: "Whispers of Wisdom" },
       note: {
         ru: "С участием лауреата премии «Оскар» сэра Бена Кингсли",
@@ -103,14 +106,14 @@ window.SITE = {
       clients: ["cisc"]
     },
     {
-      id: "imom-al-buxoriy", year: 2025, type: "doc", featured: true,
+      id: "imom-al-buxoriy", year: 2025, type: "doc",
       title: { ru: "Имом ал-Бухорий мажмуаси", uz: "Imom al-Buxoriy majmuasi", en: "Imam al-Bukhari Complex" },
       video: { file: "assets/video/imom-al-buxoriy.mp4" },
       still: "assets/img/stills/imom-al-buxoriy.jpg",
       clients: ["cisc", "docstudio"]
     },
     {
-      id: "uch-qahramon", year: 2024, type: "feature", featured: true,
+      id: "uch-qahramon", year: 2024, type: "feature",
       title: { ru: "Уч Кахрамон", uz: "Uch qahramon", en: "Three Heroes" },
       video: { file: "assets/video/uch-qahramon.mp4" },
       still: "assets/img/stills/uch-qahramon.jpg",
@@ -139,7 +142,7 @@ window.SITE = {
       clients: ["tiiame"]
     },
     {
-      id: "chilonzor", year: 2023, type: "doc", featured: true,
+      id: "chilonzor", year: 2023, type: "doc",
       title: { ru: "Чиланзар: Душа столицы", uz: "Chilonzor: Poytaxt qalbi", en: "Chilanzar: Soul of the Capital" },
       clients: ["chilanzar", "cinema", "docstudio"]
     },
@@ -152,11 +155,11 @@ window.SITE = {
       id: "vijdon-saratoni", year: 2022, type: "doc",
       title: { ru: "Виждон саратони", uz: "Vijdon saratoni", en: "Cancer of Conscience" },
       video: { file: "assets/video/vijdon-saratoni.mp4" },
-      still: "assets/img/stills/vijdon-saratoni.jpg",
+      still: "assets/img/stills/vijdon-saratoni.jpg", stillPos: "65% 50%",
       clients: ["sgb", "anticorr"]
     },
     {
-      id: "bir-kunlik-toy", year: 2021, type: "feature", featured: true,
+      id: "bir-kunlik-toy", year: 2021, type: "feature",
       title: { ru: "Бир кунлик туй", uz: "Bir kunlik to'y", en: "A One-Day Wedding" },
       clients: ["cinema"]
     },
@@ -176,7 +179,7 @@ window.SITE = {
       id: "abdulla-oripov", year: 2021, type: "doc",
       title: { ru: "Абдулла Орипов", uz: "Abdulla Oripov", en: "Abdulla Aripov" },
       video: { file: "assets/video/abdulla-oripov.mp4" },
-      still: "assets/img/stills/abdulla-oripov.jpg",
+      still: "assets/img/stills/abdulla-oripov.jpg", stillPos: "30% 50%",
       clients: ["cinema", "docstudio", "tiiame"]
     },
     {

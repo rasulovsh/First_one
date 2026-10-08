@@ -171,7 +171,7 @@
     var billing = clientNames(p).join(" · ");
     return (
       '<div class="poster' + (p.still ? " poster--still" : "") + '" aria-hidden="true">' +
-        (p.still ? '<img class="poster__still" src="' + esc(p.still) + '" alt="" loading="lazy">' : "") +
+        (p.still ? '<img class="poster__still" src="' + esc(p.still) + '" alt="" loading="lazy"' + (p.stillPos ? ' style="object-position:' + esc(p.stillPos) + '"' : "") + ">" : "") +
         '<div class="poster__top mono"><span>Spectre Studio</span><span>' + p.year + "</span></div>" +
         "<div>" +
           '<div class="poster__title">' + esc(L(p.title)) + "</div>" +
@@ -264,7 +264,7 @@
     var reelBtn = reel && (reel.file || embedURL(reel))
       ? '<button type="button" class="btn" data-reel><i class="play-icon"></i>' + t("hero.cta.reel") + "</button>"
       : "";
-    var featured = projects.filter(function (p) { return p.featured; });
+    var featured = SITE.featured.map(project).filter(Boolean);
 
     return (
       '<section class="hero">' +
