@@ -122,6 +122,7 @@ window.SITE = {
       title: { ru: "Уч Кахрамон", uz: "Uch qahramon", en: "Three Heroes" },
       video: { file: "assets/video/uch-qahramon.mp4" },
       still: "assets/img/stills/uch-qahramon.jpg",
+      poster: "assets/img/posters/uch-qahramon.jpg",
       clients: ["mvd", "cinema"]
     },
     {
