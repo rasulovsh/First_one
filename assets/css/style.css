@@ -87,8 +87,15 @@ h1, h2, h3, p { margin: 0; }
   top: 0; left: 0; right: 0;
   z-index: 50;
   height: var(--header-h);
-  transition: background .4s var(--ease), border-color .4s var(--ease);
+  transition: background .4s var(--ease), border-color .4s var(--ease), transform .45s var(--ease);
   border-bottom: 1px solid transparent;
+}
+.header.is-hidden { transform: translateY(-100%); }
+.header.is-solid::before { background: var(--bg); }
+/* Закрывает полосу над шапкой в Safari на iPhone (контент там больше не просвечивает) */
+.header::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 100%;
+  height: 120px; pointer-events: none;
 }
 .header.is-solid {
   background: rgba(10, 10, 11, .86);

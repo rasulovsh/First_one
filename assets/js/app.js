@@ -584,9 +584,18 @@
     });
   }
 
+  var lastY = 0;
   function onScroll() {
     var h = document.querySelector(".header");
-    if (h) h.classList.toggle("is-solid", window.scrollY > 40 || page !== "home");
+    if (!h) return;
+    var y = Math.max(0, window.scrollY);
+    h.classList.toggle("is-solid", y > 40 || page !== "home");
+    // Прячем шапку при прокрутке вниз, показываем при прокрутке вверх
+    if (!document.body.classList.contains("menu-open") && Math.abs(y - lastY) > 6) {
+      h.classList.toggle("is-hidden", y > lastY && y > 200);
+      lastY = y;
+    }
+    if (y <= 200) h.classList.remove("is-hidden");
   }
 
   /* ---------- Рендер ---------- */
