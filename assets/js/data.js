@@ -22,7 +22,7 @@ window.SITE = {
   // Можно и { youtube: "ID" } или { vimeo: "ID" }.
   showreel: {
     file: "assets/video/showreel.mp4",
-    background: "assets/video/showreel-bg.mp4",
+    background: "assets/video/showreel-bg.mp4?v=2",
     poster: "assets/img/stills/showreel.jpg"
   },
 
