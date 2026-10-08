@@ -170,7 +170,8 @@
     }
     var billing = clientNames(p).join(" · ");
     return (
-      '<div class="poster" aria-hidden="true">' +
+      '<div class="poster' + (p.still ? " poster--still" : "") + '" aria-hidden="true">' +
+        (p.still ? '<img class="poster__still" src="' + esc(p.still) + '" alt="" loading="lazy">' : "") +
         '<div class="poster__top mono"><span>Spectre Studio</span><span>' + p.year + "</span></div>" +
         "<div>" +
           '<div class="poster__title">' + esc(L(p.title)) + "</div>" +
@@ -256,8 +257,9 @@
 
   function homePage() {
     var reel = SITE.showreel;
-    var media = reel && reel.file
-      ? '<video src="' + esc(reel.file) + '" autoplay muted loop playsinline></video>'
+    var bg = reel && (reel.background || reel.file);
+    var media = bg
+      ? '<video src="' + esc(bg) + '" autoplay muted loop playsinline' + (reel.poster ? ' poster="' + esc(reel.poster) + '"' : "") + "></video>"
       : '<div class="hero__beam"></div>';
     var reelBtn = reel && (reel.file || embedURL(reel))
       ? '<button type="button" class="btn" data-reel><i class="play-icon"></i>' + t("hero.cta.reel") + "</button>"
@@ -352,7 +354,10 @@
     var next = projects[(i + 1) % projects.length];
     var src = embedURL(p.video);
 
-    var player = src
+    var player = p.video && p.video.file
+      ? '<video src="' + esc(p.video.file) + '" controls preload="metadata" playsinline' +
+          (p.still ? ' poster="' + esc(p.still) + '"' : "") + "></video>"
+      : src
       ? iframeHTML(src, L(p.title))
       : '<div class="player__empty">' +
           '<div class="player__corner player__corner--tl mono">' + (p.status === "production" ? '<span class="rec-dot"></span>' : "") + esc(L(p.title)) + "</div>" +

@@ -7,6 +7,9 @@
  * Как добавить видео к проекту:
  *   video: { youtube: "ID_РОЛИКА" }   — например для https://youtu.be/dQw4w9WgXcQ это "dQw4w9WgXcQ"
  *   video: { vimeo: "123456789" }      — числовой ID ролика на Vimeo
+ *   video: { file: "assets/video/имя.mp4" } — свой файл (трейлер), сжатый для веба
+ *
+ * still: "assets/img/stills/имя.jpg" — кадр из фильма: фон обложки и заставка плеера.
  *
  * Как добавить постер: положите файл в assets/img/posters/ и укажите
  *   poster: "assets/img/posters/hoshimov.jpg"
@@ -14,10 +17,14 @@
  */
 
 window.SITE = {
-  // Шоурил на главной. Варианты:
-  //   showreel: { file: "assets/video/showreel.mp4" }  — короткий фон без звука (до ~20 МБ)
-  //   showreel: { youtube: "ID" } или { vimeo: "ID" }   — кнопка «Смотреть шоурил» откроет плеер
-  showreel: null,
+  // Шоурил: file — версия со звуком для кнопки «Шоурил»,
+  // background — лёгкая версия без звука для фона главной.
+  // Можно и { youtube: "ID" } или { vimeo: "ID" }.
+  showreel: {
+    file: "assets/video/showreel.mp4",
+    background: "assets/video/showreel-bg.mp4",
+    poster: "assets/img/stills/showreel.jpg"
+  },
 
   // Все полные версии фильмов
   vimeoShowcase: "https://vimeo.com/showcase/12080332",
@@ -92,17 +99,35 @@ window.SITE = {
         uz: "«Oskar» mukofoti sohibi ser Ben Kingsli ishtirokida",
         en: "Featuring Academy Award winner Sir Ben Kingsley"
       },
+      video: { file: "assets/video/whispers-of-wisdom.mp4" },
+      still: "assets/img/stills/whispers-of-wisdom.jpg",
       clients: ["cisc"]
     },
     {
       id: "imom-al-buxoriy", year: 2025, type: "doc", featured: true,
       title: { ru: "Имом ал-Бухорий мажмуаси", uz: "Imom al-Buxoriy majmuasi", en: "Imam al-Bukhari Complex" },
+      video: { file: "assets/video/imom-al-buxoriy.mp4" },
+      still: "assets/img/stills/imom-al-buxoriy.jpg",
       clients: ["cisc", "docstudio"]
     },
     {
       id: "uch-qahramon", year: 2024, type: "feature", featured: true,
       title: { ru: "Уч Кахрамон", uz: "Uch qahramon", en: "Three Heroes" },
+      video: { file: "assets/video/uch-qahramon.mp4" },
+      still: "assets/img/stills/uch-qahramon.jpg",
       clients: ["mvd", "cinema"]
+    },
+    {
+      id: "referendum", year: 2023, type: "promo",
+      title: { ru: "Пишем историю вместе", uz: "Tariximizni birgalikda yozamiz", en: "Writing Our History Together" },
+      note: {
+        ru: "Социальный ролик к референдуму",
+        uz: "Referendumga bag'ishlangan ijtimoiy rolik",
+        en: "Social video for the referendum"
+      },
+      video: { file: "assets/video/referendum.mp4" },
+      still: "assets/img/stills/referendum.jpg",
+      clients: []
     },
     {
       id: "evakuatsiya", year: 2023, type: "doc",
@@ -127,6 +152,8 @@ window.SITE = {
     {
       id: "vijdon-saratoni", year: 2022, type: "doc",
       title: { ru: "Виждон саратони", uz: "Vijdon saratoni", en: "Cancer of Conscience" },
+      video: { file: "assets/video/vijdon-saratoni.mp4" },
+      still: "assets/img/stills/vijdon-saratoni.jpg",
       clients: ["sgb", "anticorr"]
     },
     {
@@ -137,6 +164,8 @@ window.SITE = {
     {
       id: "mustahkam", year: 2021, type: "doc",
       title: { ru: "Мустахкам", uz: "Mustahkam", en: "Steadfast" },
+      video: { file: "assets/video/mustahkam.mp4" },
+      still: "assets/img/stills/mustahkam.jpg",
       clients: ["sgb"]
     },
     {
@@ -147,12 +176,23 @@ window.SITE = {
     {
       id: "abdulla-oripov", year: 2021, type: "doc",
       title: { ru: "Абдулла Орипов", uz: "Abdulla Oripov", en: "Abdulla Aripov" },
+      video: { file: "assets/video/abdulla-oripov.mp4" },
+      still: "assets/img/stills/abdulla-oripov.jpg",
       clients: ["cinema", "docstudio", "tiiame"]
     },
     {
       id: "alisher-navoiy", year: 2021, type: "doc",
       title: { ru: "Алишер Навоий", uz: "Alisher Navoiy", en: "Alisher Navoi" },
+      video: { file: "assets/video/alisher-navoiy.mp4" },
+      still: "assets/img/stills/alisher-navoiy.jpg",
       clients: ["cinema", "docstudio"]
+    },
+    {
+      id: "adiblar-xiyoboni", year: 2020, type: "doc",
+      title: { ru: "Адиблар хиёбони", uz: "Adiblar xiyoboni", en: "Writers' Alley" },
+      video: { file: "assets/video/adiblar-xiyoboni.mp4" },
+      still: "assets/img/stills/adiblar-xiyoboni.jpg",
+      clients: []
     },
     {
       id: "xalq-yuragi", year: 2020, type: "doc",
