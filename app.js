@@ -1,4 +1,5 @@
-import { FilesetResolver, AudioClassifier } from './vendor/mediapipe/audio_bundle.mjs';
+import { FilesetResolver, AudioClassifier, AudioEmbedder } from './vendor/mediapipe/audio_bundle.mjs';
+import { REASONS, REASON_KEYS, loadBaseModel, meanEmbedding, packEmb, unpackEmb, predict } from './reasons.js';
 
 /* =========================================================
    Группы звуков. YAMNet знает 521 звук — собираем нужные.
@@ -63,7 +64,7 @@ const $ = (s) => document.querySelector(s);
 const el = {
   status: $('#status'), big: $('#bigState'), bigEmoji: $('#bigEmoji'), bigLabel: $('#bigLabel'), bigSub: $('#bigSub'),
   meter: $('#meterFill'), btn: $('#btnListen'), live: $('#liveList'), hint: $('#hint'), hintList: $('#hintList'),
-  since: $('#since'), logList: $('#logList'), stats: $('#todayStats'), flash: $('#flash'), toast: $('#toast'),
+  since: $('#since'), hintSrc: $('#hintSrc'), fb: $('#feedback'), fbWhen: $('#fbWhen'), fbChips: $('#fbChips'), logList: $('#logList'), stats: $('#todayStats'), flash: $('#flash'), toast: $('#toast'),
 };
 
 function toast(msg, ms = 2500) {
@@ -99,16 +100,21 @@ document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('cli
 /* =========================================================
    Модель
    ========================================================= */
-let classifier = null;
+let classifier = null, embedder = null;
 async function loadModel() {
-  if (classifier) return classifier;
-  setBig('⏳', 'Загружаю модель…', 'Первый раз ~15 МБ, потом работает без интернета');
+  if (classifier && embedder) return classifier;
+  setBig('⏳', 'Загружаю модели…', 'Первый раз ~25 МБ, потом работает без интернета');
   const base = new URL('./vendor/mediapipe/wasm', location.href).href;
   const fileset = await FilesetResolver.forAudioTasks(base);
   classifier = await AudioClassifier.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: new URL('./models/yamnet.tflite', location.href).href },
     maxResults: 80,
   });
+  embedder = await AudioEmbedder.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: new URL('./models/yamnet_embedder.tflite', location.href).href },
+    l2Normalize: true,
+  });
+  await loadBaseModel(new URL('./models/cry_reason.json', location.href).href);
   return classifier;
 }
 
@@ -198,7 +204,7 @@ el.btn.addEventListener('click', () => (listening ? stopListening() : startListe
 
 /* ---------- один шаг анализа (каждые 0.5 с) ---------- */
 let frames = [];            // история кадров: {t, scores}
-let cryActive = false, cryStart = 0, cryLastSeen = 0, cryPeak = 0;
+let cryActive = false, cryStart = 0, cryLastSeen = 0, cryPeak = 0, cryEmbs = [], lastReasonRender = 0;
 let lastAlert = 0;
 const lastLogged = {};      // группа -> время последней записи в журнал
 
@@ -230,6 +236,16 @@ function tick() {
   if (level < 0.002) scores.silence = Math.max(scores.silence || 0, 0.9);
 
   const now = Date.now();
+  // признаки звука для «почему плачет» — только когда похоже на плач
+  if ((scores.cry || 0) >= threshold() * 0.8 || (scores.whimper || 0) >= threshold()) {
+    try {
+      const er = embedder.embed(buf, sr);
+      const v = er && er[0] && er[0].embeddings[0].floatEmbedding;
+      if (v) { cryEmbs.push(Float32Array.from(v)); if (!cryActive && cryEmbs.length > 4) cryEmbs.shift(); }
+    } catch (e) { console.warn(e); }
+  } else if (!cryActive && frames.length && now - frames[frames.length - 1].t > 0 && (scores.cry || 0) < 0.05) {
+    cryEmbs = [];
+  }
   frames.push({ t: now, scores });
   if (frames.length > 20) frames.shift();
 
@@ -252,6 +268,7 @@ function detect(now, scores) {
 
   if (cryActive) {
     setBig('😭', 'Плачет', 'уже ' + durText((now - cryStart) / 1000), 'cry');
+    if (now - lastReasonRender > 2000) { lastReasonRender = now; renderHint(true); }
     return;
   }
 
@@ -287,14 +304,20 @@ function onCryStart() {
   if (settings.flash) { el.flash.classList.remove('on'); void el.flash.offsetWidth; el.flash.classList.add('on'); }
   if (settings.sound) chime();
   if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
-  const reasons = hintReasons().slice(0, 2).map((r) => '• ' + r.text).join('\n');
+  const reasons = currentPrediction().ranked.slice(0, 3).map((r) => `• ${r.name} — ${Math.round(r.p * 100)}%`).join('\n');
   notifyRemote('Малыш плачет (' + hhmm(now) + ')' + (reasons ? '\n' + reasons : ''), 'baby', 'high');
 }
 
 function endCry() {
   cryActive = false;
   const dur = Math.max(1, (cryLastSeen - cryStart) / 1000);
-  addLog({ t: cryStart, kind: 'sound', type: 'cry', dur: Math.round(dur) });
+  const id = 'c' + cryStart;
+  const emb = meanEmbedding(cryEmbs);
+  const pred = currentPrediction();
+  if (emb) { const all = store.get('cryemb', {}); all[id] = packEmb(emb); store.set('cryemb', all); }
+  cryEmbs = [];
+  addLog({ t: cryStart, kind: 'sound', type: 'cry', dur: Math.round(dur), id, guess: pred.ranked[0].key });
+  renderFeedback();
 }
 
 /* =========================================================
@@ -359,39 +382,68 @@ function lastOf(type, kind = 'manual') {
   return null;
 }
 
-function hintReasons() {
+// отмеченные вами эпизоды плача → «опыт с вашим ребёнком»
+function personalExamples() {
+  const all = store.get('cryemb', {});
+  return log.filter((e) => e.type === 'cry' && e.reason && e.reason !== 'unknown' && all[e.id])
+    .map((e) => ({ reason: e.reason, emb: unpackEmb(all[e.id]) }));
+}
+
+function currentPrediction(emb = meanEmbedding(cryEmbs)) {
   const now = Date.now();
-  const out = [];
-  const feed = lastOf('feed'), diaper = lastOf('diaper'), sleep = lastOf('sleep'), wake = lastOf('wake');
-
-  if (feed) {
-    const m = (now - feed) / 60000;
-    if (m >= 120) out.push({ w: 3, text: `Голод — с кормления прошло ${ago(now - feed)} (в 3 недели едят каждые 2–3 ч)` });
-    else if (m >= 90) out.push({ w: 2, text: `Может проголодаться — с кормления ${ago(now - feed)}` });
-    else if (m <= 45) out.push({ w: 2, text: `Ела ${ago(now - feed)} назад — подержите столбиком, может быть воздух или газики` });
-  }
-  if (diaper && now - diaper >= 2 * 3600000) out.push({ w: 2, text: `Проверьте подгузник — меняли ${ago(now - diaper)} назад` });
-  if (wake && (!sleep || wake > sleep)) {
-    const m = (now - wake) / 60000;
-    if (m >= 50) out.push({ w: 2, text: `Устала — бодрствует ${ago(now - wake)} (норма сейчас ~45–60 мин)` });
-  }
-  const tenMin = now - 10 * 60000;
-  const tummy = log.some((e) => e.kind === 'sound' && e.t > tenMin && ['hiccup', 'burp', 'fart'].includes(e.type));
-  if (tummy) out.push({ w: 2, text: 'Недавно была икота/газики — возможно, животик' });
-
-  if (!feed && !diaper && !wake) out.push({ w: 1, text: 'Отмечайте кормления, сон и подгузник — подсказки станут точнее' });
-  out.push({ w: 0, text: 'Жарко/холодно, тугая одежда, хочет на ручки' });
-  return out.sort((a, b) => b.w - a.w);
+  const tummy = log.some((e) => e.kind === 'sound' && e.t > now - 10 * 60000 && ['hiccup', 'burp', 'fart'].includes(e.type));
+  return predict(emb, personalExamples(), {
+    now, feed: lastOf('feed'), diaper: lastOf('diaper'), sleep: lastOf('sleep'), wake: lastOf('wake'), tummySounds: tummy,
+  });
 }
 
 function renderHint(show) {
   if (!show) { el.hint.classList.add('hidden'); return; }
+  const pred = currentPrediction();
   el.hintList.innerHTML = '';
-  for (const r of hintReasons()) {
-    const li = document.createElement('li'); li.textContent = r.text; el.hintList.appendChild(li);
-  }
+  pred.ranked.slice(0, 4).forEach((r, i) => {
+    const li = document.createElement('li');
+    li.className = 'reason' + (i === 0 ? ' best' : '');
+    li.innerHTML = `<div class="rrow"><span></span><span class="bar"><i style="width:${Math.round(r.p * 100)}%"></i></span><span class="pct">${Math.round(r.p * 100)}%</span></div><div class="tip small muted"></div>`;
+    li.querySelector('span').textContent = `${r.emoji} ${r.name}`;
+    li.querySelector('.tip').textContent = r.tip;
+    el.hintList.appendChild(li);
+  });
+  const src = pred.sources;
+  const parts = [];
+  if (src.sound) parts.push('звук плача');
+  if (src.why.length) parts.push('время: ' + src.why.join(', '));
+  parts.push(src.personalN ? `ваш опыт: ${src.personalN} отмеч. эпизодов` : 'ваш опыт: пока нет отметок');
+  el.hintSrc.textContent = 'Учтено — ' + parts.join(' · ');
   el.hint.classList.remove('hidden');
 }
+
+/* ---------- «Что помогло?» после плача ---------- */
+function pendingCry() {
+  for (let i = log.length - 1; i >= 0; i--) {
+    const e = log[i];
+    if (e.type === 'cry' && e.kind === 'sound') return !e.reason && Date.now() - e.t < 6 * 3600000 ? e : null;
+  }
+  return null;
+}
+function renderFeedback() {
+  const e = pendingCry();
+  if (!e) { el.fb.classList.add('hidden'); return; }
+  el.fbWhen.textContent = `Плач в ${hhmm(e.t)}, ${durText(e.dur || 0)}` +
+    (e.guess ? ` · приложение думало: ${REASONS[e.guess].name.toLowerCase()}` : '');
+  el.fb.classList.remove('hidden');
+}
+el.fbChips.innerHTML = REASON_KEYS.map((k) => `<button class="btn chip" data-reason="${k}">${REASONS[k].emoji} ${REASONS[k].name}</button>`).join('') +
+  '<button class="btn chip ghost" data-reason="unknown">🤷 Не понятно</button>';
+el.fbChips.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-reason]'); if (!b) return;
+  const e = pendingCry(); if (!e) return;
+  e.reason = b.dataset.reason; saveLog();
+  renderFeedback(); renderHint(false);
+  const n = personalExamples().length;
+  toast(e.reason === 'unknown' ? 'Хорошо, пропустим' : `Запомнила! Отмеченных эпизодов: ${n}`);
+  if (document.querySelector('#tab-log.active')) renderLog();
+});
 
 /* =========================================================
    Отрисовка
@@ -426,7 +478,8 @@ function addLog(entry) {
 function entryText(e) {
   if (e.kind === 'manual') return `${MANUAL[e.type].emoji} ${MANUAL[e.type].name}`;
   const g = GROUPS[e.type];
-  return `${g.emoji} ${g.name}` + (e.dur ? ` · ${durText(e.dur)}` : '');
+  return `${g.emoji} ${g.name}` + (e.dur ? ` · ${durText(e.dur)}` : '') +
+    (e.reason && REASONS[e.reason] ? ` → ${REASONS[e.reason].emoji} ${REASONS[e.reason].name.toLowerCase()}` : '');
 }
 
 function renderLog() {
@@ -488,6 +541,7 @@ function renderSince() {
   if (sleep && (!wake || sleep > wake)) html += `<div>😴 Спит: <b>${ago(now - sleep)}</b></div>`;
   else if (wake) html += `<div>☀️ Бодрствует: <b>${ago(now - wake)}</b></div>`;
   el.since.innerHTML = html;
+  renderFeedback();
 }
 
 /* ---------- ручные отметки ---------- */
@@ -495,7 +549,7 @@ document.querySelectorAll('[data-log]').forEach((b) => b.addEventListener('click
   const type = b.dataset.log;
   addLog({ t: Date.now(), kind: 'manual', type });
   toast(`${MANUAL[type].emoji} ${MANUAL[type].name} — ${hhmm(Date.now())}`);
-  if (type === 'calm' || type === 'feed') renderHint(false);
+  if (type === 'calm' && !cryActive) renderHint(false);
 }));
 
 $('#btnClear').addEventListener('click', () => {

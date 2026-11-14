@@ -35,9 +35,17 @@
       <button id="btnListen" class="btn primary big">▶︎ Начать слушать</button>
 
       <div id="hint" class="card hint hidden">
-        <h3>Возможные причины</h3>
-        <ul id="hintList"></ul>
-        <p class="small muted">Это подсказки по времени из дневника, а не диагноз.</p>
+        <h3>Почему плачет — вероятнее всего</h3>
+        <ul id="hintList" class="reasons"></ul>
+        <p id="hintSrc" class="small muted"></p>
+        <p class="small muted">Это подсказка, а не диагноз. Если плач необычный (пронзительный, со стонами), температура, вялость или отказ от еды — звоните педиатру.</p>
+      </div>
+
+      <div id="feedback" class="card feedback hidden">
+        <h3>Что помогло? 🙏</h3>
+        <p id="fbWhen" class="small muted"></p>
+        <div id="fbChips" class="grid2"></div>
+        <p class="small muted">Каждая отметка учит приложение узнавать плач именно вашей дочки.</p>
       </div>
 
       <div class="card">
