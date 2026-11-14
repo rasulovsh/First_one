@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Малыш слышит</title>
+  <meta name="description" content="Распознавание детского плача и звуков прямо на телефоне">
+  <meta name="theme-color" content="#1b1f3b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Малыш">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Малыш слышит</h1>
+    <span id="status" class="status">не слушаю</span>
+  </header>
+
+  <main>
+    <!-- ===== Экран: Слушать ===== -->
+    <section id="tab-listen" class="tab active">
+      <div id="bigState" class="big-state idle">
+        <div class="emoji" id="bigEmoji">🌙</div>
+        <div class="label" id="bigLabel">Нажмите «Начать слушать»</div>
+        <div class="sub" id="bigSub">Положите телефон рядом с кроваткой (1–2 м)</div>
+      </div>
+
+      <div class="meter"><div id="meterFill"></div></div>
+
+      <button id="btnListen" class="btn primary big">▶︎ Начать слушать</button>
+
+      <div id="hint" class="card hint hidden">
+        <h3>Возможные причины</h3>
+        <ul id="hintList"></ul>
+        <p class="small muted">Это подсказки по времени из дневника, а не диагноз.</p>
+      </div>
+
+      <div class="card">
+        <h3>Что слышно сейчас</h3>
+        <ul id="liveList" class="live"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Отметить</h3>
+        <div class="grid3">
+          <button class="btn chip" data-log="feed">🍼 Покормили</button>
+          <button class="btn chip" data-log="sleep">😴 Уснула</button>
+          <button class="btn chip" data-log="wake">☀️ Проснулась</button>
+          <button class="btn chip" data-log="diaper">🧷 Подгузник</button>
+          <button class="btn chip" data-log="burp">💨 Срыгнула</button>
+          <button class="btn chip" data-log="calm">🤗 Успокоили</button>
+        </div>
+        <div id="since" class="since"></div>
+      </div>
+    </section>
+
+    <!-- ===== Экран: Журнал ===== -->
+    <section id="tab-log" class="tab">
+      <div class="card">
+        <h3>Сегодня</h3>
+        <div id="todayStats" class="stats"></div>
+      </div>
+      <div class="card">
+        <div class="row between">
+          <h3>Журнал</h3>
+          <button id="btnClear" class="btn tiny ghost">Очистить</button>
+        </div>
+        <ul id="logList" class="log"></ul>
+      </div>
+    </section>
+
+    <!-- ===== Экран: Настройки ===== -->
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h3>Чувствительность</h3>
+        <input type="range" id="sens" min="1" max="10" step="1">
+        <div class="row between small muted"><span>меньше ложных</span><span id="sensVal"></span><span>чувствительнее</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Сигнал при плаче</h3>
+        <label class="toggle"><input type="checkbox" id="optSound"> Звуковой сигнал на этом телефоне</label>
+        <label class="toggle"><input type="checkbox" id="optFlash"> Мигание экрана</label>
+      </div>
+
+      <div class="card">
+        <h3>Уведомление на другой телефон</h3>
+        <p class="small muted">
+          Оставьте этот телефон у кроватки, а уведомления получайте на свой.
+          Установите на свой телефон бесплатное приложение <b>ntfy</b> (App Store),
+          подпишитесь на придуманную вами длинную тему и впишите её сюда.
+        </p>
+        <input type="text" id="ntfyTopic" placeholder="например: malysh-7f3k9q2x" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="btnTestNtfy" class="btn ghost">Отправить тест</button>
+        <p class="small muted">Тему знает только тот, кто её придумал, поэтому делайте её длинной и случайной.</p>
+      </div>
+
+      <div class="card">
+        <h3>Пауза после сигнала</h3>
+        <select id="cooldown">
+          <option value="30">30 секунд</option>
+          <option value="60">1 минута</option>
+          <option value="120">2 минуты</option>
+          <option value="300">5 минут</option>
+        </select>
+      </div>
+
+      <div class="card small muted">
+        <h3>Важно</h3>
+        <p>Звук анализируется только на телефоне, никуда не отправляется и не записывается.</p>
+        <p>iPhone перестаёт слушать микрофон, если экран заблокирован или приложение свёрнуто. Держите приложение открытым и телефон на зарядке — экран сам не погаснет.</p>
+        <p>Приложение — помощник, а не медицинское устройство и не замена присмотру.</p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button data-tab="listen" class="active">👂<span>Слушать</span></button>
+    <button data-tab="log">📋<span>Журнал</span></button>
+    <button data-tab="settings">⚙️<span>Настройки</span></button>
+  </nav>
+
+  <div id="flash" class="flash"></div>
+  <div id="toast" class="toast"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
