@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07080f">
+<title>Имам Бухари · Аудиогид</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Manrope:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#07080f;--ink:#f2e9d8;--soft:#bfb39a;--mute:rgba(242,233,216,.45);--gold:#c9a25a;--gold2:#ecd29a;--hair:rgba(201,162,90,.22);
+  --ease:cubic-bezier(.22,.61,.21,1)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-weight:400;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+.serif{font-family:"Cormorant Garamond",Georgia,serif}
+.view{display:none}.view.on{display:block}
+
+/* ---------- STAGE ---------- */
+.stage{position:relative;height:100svh;min-height:560px;overflow:hidden;isolation:isolate}
+.bg{position:absolute;inset:-4%;background-size:cover;background-position:center;z-index:-3;opacity:0;
+  transform:scale(1.04);transition:opacity 2.4s var(--ease)}
+.bg.in{opacity:1;animation:kb 48s ease-in-out infinite alternate}
+@keyframes kb{0%{transform:scale(1.04) translate3d(0,0,0)}100%{transform:scale(1.2) translate3d(-2%,-3%,0)}}
+.shade{position:absolute;inset:0;z-index:-2;
+  background:radial-gradient(120% 70% at 50% 35%,rgba(7,8,15,0) 0%,rgba(7,8,15,.35) 55%,rgba(7,8,15,.92) 100%),
+             linear-gradient(180deg,rgba(7,8,15,.65) 0%,rgba(7,8,15,0) 22%,rgba(7,8,15,.1) 45%,rgba(7,8,15,.82) 72%,var(--bg) 100%)}
+.sweep{position:absolute;inset:-50% -100%;z-index:-1;pointer-events:none;
+  background:linear-gradient(105deg,transparent 42%,rgba(236,210,154,.07) 50%,transparent 58%);
+  animation:sweep 14s ease-in-out infinite}
+@keyframes sweep{0%,30%{transform:translateX(-40%)}70%,100%{transform:translateX(40%)}}
+canvas#dust{position:absolute;inset:0;z-index:-1;pointer-events:none;mix-blend-mode:screen}
+
+.top{position:absolute;top:calc(18px + env(safe-area-inset-top));left:0;right:0;text-align:center;
+  font-size:10px;letter-spacing:.42em;text-transform:uppercase;color:var(--gold2);opacity:0;animation:up 1.6s .3s var(--ease) forwards}
+.top i{display:inline-block;width:4px;height:4px;background:var(--gold);transform:rotate(45deg);margin:0 10px 2px;font-style:normal}
+
+.cap{position:absolute;left:0;right:0;bottom:calc(36px + env(safe-area-inset-bottom));padding:0 28px;text-align:center}
+.eyebrow{font-size:11px;letter-spacing:.38em;text-transform:uppercase;color:var(--gold);opacity:0;animation:up 1.4s .8s var(--ease) forwards}
+.title{font-size:clamp(38px,11vw,56px);line-height:.98;font-weight:500;margin:14px auto 0;max-width:12ch;letter-spacing:-.005em}
+.title span{display:inline-block;opacity:0;transform:translateY(18px);filter:blur(6px);animation:word 1.6s var(--ease) forwards}
+@keyframes word{to{opacity:1;transform:none;filter:none}}
+.rule{width:0;height:1px;margin:22px auto 0;background:linear-gradient(90deg,transparent,var(--gold),transparent);animation:rule 2.2s 1.6s var(--ease) forwards}
+@keyframes rule{to{width:120px}}
+.sub{font-family:"Cormorant Garamond",serif;font-style:italic;font-size:19px;color:var(--soft);margin-top:14px;opacity:0;animation:up 1.6s 2s var(--ease) forwards}
+@keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* subtitle line (during playback) */
+.line{position:relative;height:0;overflow:hidden;transition:height 1s var(--ease)}
+.playing .line{height:168px}
+.line p{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);font-family:"Cormorant Garamond",serif;font-size:21px;line-height:1.38;color:#efe4cd;
+  opacity:0;transition:opacity 1.4s var(--ease),filter 1.4s var(--ease);filter:blur(4px);padding:0 4px}
+.line p.on{opacity:1;filter:none}
+.playing .sub{display:none}
+.playing .title{font-size:clamp(30px,8.6vw,42px);transition:font-size 1s var(--ease)}
+
+/* player */
+.player{margin-top:26px;display:flex;align-items:center;justify-content:center;gap:28px;opacity:0;animation:up 1.6s 2.4s var(--ease) forwards}
+.side{width:54px;font-size:11px;color:var(--mute);font-variant-numeric:tabular-nums;letter-spacing:.06em;background:none;border:none;font-family:inherit;cursor:pointer}
+.side svg{width:22px;height:22px;stroke:var(--soft);fill:none;stroke-width:1.2;display:block;margin:0 auto 4px}
+.btn{position:relative;width:96px;height:96px;border-radius:50%;border:none;cursor:pointer;background:rgba(10,11,20,.35);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.halo{position:absolute;inset:-14px;border-radius:50%;background:radial-gradient(circle,rgba(236,210,154,.22),rgba(236,210,154,0) 65%);
+  transform:scale(var(--lv,1));transition:transform .12s linear;pointer-events:none}
+.idle .halo{animation:breathe 4.5s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(.92);opacity:.6}50%{transform:scale(1.15);opacity:1}}
+.btn svg.r{position:absolute;inset:0;width:96px;height:96px;transform:rotate(-90deg)}
+.r circle{fill:none}
+.r .t{stroke:rgba(201,162,90,.35);stroke-width:1}
+.r .p{stroke:var(--gold2);stroke-width:1.6;stroke-linecap:round;transition:stroke-dashoffset .3s linear}
+.btn svg.i{position:absolute;inset:0;margin:auto;width:26px;height:26px;fill:var(--gold2)}
+.hint{margin-top:16px;font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--mute);opacity:0;animation:up 1.6s 2.8s var(--ease) forwards}
+.scrollcue{display:block;width:1px;height:28px;margin:14px auto 0;background:linear-gradient(var(--gold),transparent);opacity:.6;animation:cue 2.6s ease-in-out infinite}
+@keyframes cue{0%,100%{transform:scaleY(.4);transform-origin:top}50%{transform:scaleY(1)}}
+
+/* ---------- MORE ---------- */
+.more{padding:56px 28px 40px;max-width:560px;margin:0 auto}
+.label{font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:var(--gold);text-align:center;margin-bottom:26px}
+.facts{border-top:1px solid var(--hair)}
+.fact{display:flex;align-items:baseline;gap:18px;padding:20px 2px;border-bottom:1px solid var(--hair)}
+.fact b{font-family:"Cormorant Garamond",serif;font-weight:500;font-size:40px;color:var(--gold2);min-width:118px;line-height:1}
+.fact span{font-size:14px;color:var(--soft);line-height:1.45;font-weight:300}
+.note{margin:40px 0 0;font-family:"Cormorant Garamond",serif;font-size:21px;line-height:1.5;color:#e2d6bd;text-align:center}
+.note em{color:var(--gold2)}
+details{margin-top:44px;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+summary{list-style:none;cursor:pointer;padding:20px 0;text-align:center;font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--soft)}
+summary::-webkit-details-marker{display:none}
+details .txt{padding:6px 0 26px}
+details .txt p{font-family:"Cormorant Garamond",serif;font-size:20px;line-height:1.55;color:#e6dbc3;margin-bottom:14px}
+.next{position:relative;display:block;margin-top:44px;height:190px;border-radius:4px;overflow:hidden;text-decoration:none;color:var(--ink)}
+.next .ni{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.05);transition:transform 6s var(--ease)}
+.next:hover .ni{transform:scale(1.12)}
+.next::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(7,8,15,.1),rgba(7,8,15,.88))}
+.next .nc{position:absolute;left:22px;right:22px;bottom:18px;z-index:1}
+.next small{font-size:10px;letter-spacing:.36em;text-transform:uppercase;color:var(--gold2)}
+.next h3{font-family:"Cormorant Garamond",serif;font-weight:500;font-size:28px;line-height:1.05;margin-top:6px}
+.foot{text-align:center;margin-top:46px;font-size:10px;letter-spacing:.42em;text-transform:uppercase;color:rgba(242,233,216,.28)}
+.foot svg{display:block;width:26px;height:26px;margin:0 auto 14px;stroke:var(--gold);fill:none;stroke-width:1;opacity:.6}
+
+/* ---------- HOME ---------- */
+.home .cap{bottom:auto;top:50%;transform:translateY(-50%)}
+.home .shade{background:radial-gradient(120% 80% at 50% 50%,rgba(7,8,15,.55),rgba(7,8,15,.92)),linear-gradient(180deg,rgba(7,8,15,.6),rgba(7,8,15,.85))}
+.home .list{margin-top:34px;display:grid;gap:12px;opacity:0;animation:up 1.6s 2.2s var(--ease) forwards}
+.home .list a{display:flex;align-items:center;gap:16px;padding:14px 16px;border:1px solid var(--hair);text-decoration:none;color:var(--ink);text-align:left;
+  background:rgba(7,8,15,.35);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.home .list small{font-size:10px;letter-spacing:.3em;color:var(--gold);width:22px}
+.home .list span{font-family:"Cormorant Garamond",serif;font-size:21px;flex:1}
+.home .list i{font-style:normal;color:var(--gold)}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01s!important;animation-iteration-count:1!important}}
+</style>
+</head>
+<body>
+
+<section class="view" id="v-ex">
+  <div class="stage idle" id="stage">
+    <div class="bg" id="bg"></div>
+    <div class="shade"></div><div class="sweep"></div>
+    <canvas id="dust"></canvas>
+    <div class="top">Bukhari<i></i>Exhibition</div>
+    <div class="cap">
+      <div class="eyebrow" id="eyebrow"></div>
+      <h1 class="title serif" id="title"></h1>
+      <div class="rule"></div>
+      <div class="sub" id="sub"></div>
+      <div class="line" id="line"></div>
+      <div class="player">
+        <button class="side" id="back" aria-label="Назад 10 секунд">
+          <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg><span id="cur">0:00</span>
+        </button>
+        <button class="btn" id="btn" aria-label="Слушать">
+          <div class="halo" id="halo"></div>
+          <svg class="r" viewBox="0 0 96 96"><circle class="t" cx="48" cy="48" r="46"/><circle class="p" id="prog" cx="48" cy="48" r="46"/></svg>
+          <svg class="i" id="ico" viewBox="0 0 24 24"></svg>
+        </button>
+        <div class="side"><svg viewBox="0 0 24 24"><path d="M3 10v4M7 7v10M11 4v16M15 8v8M19 11v2"/></svg><span id="dur">1:00</span></div>
+      </div>
+      <div class="hint" id="hint">Нажмите, чтобы слушать</div>
+      <span class="scrollcue"></span>
+    </div>
+  </div>
+
+  <div class="more">
+    <div class="label">Факты</div>
+    <div class="facts" id="facts"></div>
+    <p class="note" id="note"></p>
+    <details><summary>Текст рассказа</summary><div class="txt" id="txt"></div></details>
+    <a class="next" id="next"></a>
+    <div class="foot"><svg viewBox="0 0 48 48"><path d="M24 2l6 14 14 6-14 6-6 14-6-14-14-6 14-6z"/><circle cx="24" cy="24" r="3"/></svg>Bukhari Exhibition</div>
+  </div>
+  <audio id="audio" preload="auto" playsinline></audio>
+</section>
+
+<section class="view" id="v-home">
+  <div class="stage home">
+    <div class="bg" id="hbg"></div>
+    <div class="shade"></div><div class="sweep"></div>
+    <div class="top">Bukhari<i></i>Exhibition</div>
+    <div class="cap">
+      <div class="eyebrow">Аудиогид</div>
+      <h1 class="title serif" id="htitle"></h1>
+      <div class="rule"></div>
+      <div class="sub">Наведите камеру на QR-код у экспоната</div>
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+const EX={
+ "exhibit-1":{n:"Экспонат I",title:"Сто перепутанных хадисов",sub:"Как Багдад проверял память учёного из Бухары",img:"ex1.jpg",audio:"ex1.mp3",
+  facts:[["810","год рождения Имама Бухари в Бухаре"],["10 лет","возраст, когда он знал наизусть тысячи хадисов"],["100","хадисов в багдадском испытании"]],
+  note:"<em>Иснад</em> — цепочка людей, через которых хадис дошёл от пророка до учёного. Подменить иснад значило подделать происхождение текста.",
+  text:["Бухара, начало девятого века. Мальчику по имени Мухаммад около десяти лет, а он уже знает наизусть тысячи хадисов — преданий о словах и делах пророка Мухаммада.",
+   "Годы спустя, уже известным учёным, он приехал в Багдад. Местные знатоки решили его испытать.",
+   "Они взяли сто хадисов и перепутали их: текст одного приставили к цепочке передатчиков другого.",
+   "Десять человек по очереди зачитали ему по десять искажённых преданий.",
+   "На каждое Бухари отвечал одно и то же: «Я такого не знаю».",
+   "А когда последний закончил, он повернулся к первому и спокойно восстановил все сто хадисов.",
+   "Каждый текст вернулся к своей цепочке, в том самом порядке, в каком их читали.",
+   "Зал замолчал. С того дня в Багдаде никто больше не сомневался в памяти учёного из Бухары."]},
+ "exhibit-2":{n:"Экспонат II",title:"Книга из шестисот тысяч",sub:"Шестнадцать лет работы над «Сахих аль-Бухари»",img:"ex2.jpg",audio:"ex2.mp3",
+  facts:[["16 лет","работы над сборником"],["600 000","преданий прошли через его руки"],["7 000+","вошли в книгу"]],
+  note:"<em>Сахих</em> по-арабски значит «достоверный». Так называют хадисы, прошедшие самую строгую проверку.",
+  text:["«Сахих аль-Бухари». Эту книгу называют самой достоверной после Корана.",
+   "Имам Бухари собирал её шестнадцать лет. Через его руки прошли около шестисот тысяч преданий. В книгу он оставил чуть больше семи тысяч.",
+   "Как он выбирал? Он проверял каждого человека в цепочке передачи: честен ли он, крепка ли его память, встречался ли он лично с тем, от кого услышал хадис.",
+   "Если хотя бы одно звено вызывало сомнение, предание отклонялось, каким бы красивым оно ни было.",
+   "Рассказывают, что прежде чем записать очередной хадис, Бухари совершал омовение и молитву в два ракаата.",
+   "Двенадцать веков назад не было ни интернета, ни проверки фактов.",
+   "Был человек, который отказывался принимать на веру то, что не мог проверить."]}
+};
+const KEYS=Object.keys(EX),$=id=>document.getElementById(id);
+const audio=$("audio"),prog=$("prog"),C=2*Math.PI*46;prog.style.strokeDasharray=C;prog.style.strokeDashoffset=C;
+const PLAY='<path d="M8 5.2v13.6L19 12z"/>',PAUSE='<path d="M7.5 5h2.6v14H7.5zM13.9 5h2.6v14h-2.6z"/>';
+const fmt=s=>isFinite(s)?Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0"):"0:00";
+const words=(el,t,d0)=>{el.innerHTML=t.split(" ").map((w,i)=>`<span style="animation-delay:${d0+i*.14}s">${w}</span>`).join(" ")};
+let cur=null,marks=[],lastIdx=-1;
+
+function preload(src,cb){const im=new Image();im.onload=cb;im.onerror=cb;im.src=src}
+
+function show(){
+  const k=location.hash.slice(1);audio.pause();window.scrollTo(0,0);
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("on"));
+  if(!EX[k]){
+    $("v-home").classList.add("on");words($("htitle"),"Имам Бухари",1);
+    preload(EX[KEYS[1]].img,()=>{$("hbg").style.backgroundImage=`url(${EX[KEYS[1]].img})`;$("hbg").classList.add("in")});
+    $("list").innerHTML=KEYS.map((x,i)=>`<a href="#${x}"><small>0${i+1}</small><span>${EX[x].title}</span><i>→</i></a>`).join("");
+    return;
+  }
+  const e=EX[k];cur=e;$("v-ex").classList.add("on");
+  // restart entrance animations
+  const st=$("stage");st.classList.remove("playing");st.classList.add("idle");
+  st.querySelectorAll(".eyebrow,.rule,.sub,.player,.hint,.top").forEach(n=>{n.style.animation="none";n.offsetHeight;n.style.animation=""});
+  $("bg").classList.remove("in");
+  preload(e.img,()=>{$("bg").style.backgroundImage=`url(${e.img})`;requestAnimationFrame(()=>$("bg").classList.add("in"))});
+  $("eyebrow").textContent=e.n;words($("title"),e.title,1.1);$("sub").textContent=e.sub;
+  $("line").innerHTML=e.text.map(p=>`<p>${p}</p>`).join("");lastIdx=-1;
+  $("facts").innerHTML=e.facts.map(f=>`<div class="fact"><b>${f[0]}</b><span>${f[1]}</span></div>`).join("");
+  $("note").innerHTML=e.note;$("txt").innerHTML=e.text.map(p=>`<p>${p}</p>`).join("");
+  const nk=KEYS[(KEYS.indexOf(k)+1)%KEYS.length],n=EX[nk];
+  $("next").href="#"+nk;$("next").innerHTML=`<div class="ni" style="background-image:url(${n.img})"></div><div class="nc"><small>Следующий экспонат</small><h3>${n.title}</h3></div>`;
+  // paragraph timing proportional to text length
+  const tot=e.text.reduce((a,p)=>a+p.length,0);let acc=0;marks=e.text.map(p=>{const s=acc/tot;acc+=p.length;return s});
+  audio.src=e.audio;$("ico").innerHTML=PLAY;$("hint").textContent="Нажмите, чтобы слушать";
+  prog.style.strokeDashoffset=C;$("cur").textContent="0:00";
+  document.title=e.title+" · Имам Бухари";
+}
+
+/* audio-reactive halo */
+let actx,an,buf;
+function initAnalyser(){
+  if(actx)return;try{actx=new (window.AudioContext||window.webkitAudioContext)();const src=actx.createMediaElementSource(audio);
+  an=actx.createAnalyser();an.fftSize=512;buf=new Uint8Array(an.fftSize);src.connect(an);an.connect(actx.destination)}catch(_){actx=null}
+}
+function tick(){
+  if(an&&!audio.paused){an.getByteTimeDomainData(buf);let s=0;for(const v of buf){const d=(v-128)/128;s+=d*d}
+    const rms=Math.sqrt(s/buf.length);$("halo").style.setProperty("--lv",(1+Math.min(rms*3.2,.55)).toFixed(3))}
+  requestAnimationFrame(tick)
+}
+requestAnimationFrame(tick);
+
+$("btn").onclick=()=>{initAnalyser();if(actx&&actx.state==="suspended")actx.resume();audio.paused?audio.play().catch(()=>{}):audio.pause()};
+$("back").onclick=()=>{audio.currentTime=Math.max(0,audio.currentTime-10)};
+audio.onplay=()=>{$("stage").classList.add("playing");$("stage").classList.remove("idle");$("ico").innerHTML=PAUSE;$("hint").textContent="Идёт рассказ"};
+audio.onpause=()=>{$("ico").innerHTML=PLAY;if(!audio.ended)$("hint").textContent="Пауза";$("halo").style.setProperty("--lv",1)};
+audio.onended=()=>{$("ico").innerHTML=PLAY;$("hint").textContent="Послушать ещё раз";$("stage").classList.add("idle")};
+audio.onloadedmetadata=()=>$("dur").textContent=fmt(audio.duration);
+audio.ontimeupdate=()=>{
+  const p=audio.duration?audio.currentTime/audio.duration:0;prog.style.strokeDashoffset=C*(1-p);$("cur").textContent=fmt(audio.currentTime);
+  let i=0;for(let j=0;j<marks.length;j++)if(p>=marks[j]-.01)i=j;
+  if(i!==lastIdx){const ps=$("line").children;[...ps].forEach((x,j)=>x.classList.toggle("on",j===i));lastIdx=i}
+};
+
+/* gold dust */
+(function(){
+  const c=$("dust"),x=c.getContext("2d");let W,H,P=[];const dpr=Math.min(devicePixelRatio||1,2);
+  function rs(){W=c.width=c.offsetWidth*dpr;H=c.height=c.offsetHeight*dpr}
+  function mk(){return{x:Math.random()*W,y:Math.random()*H,r:(Math.random()*1.4+.3)*dpr,vy:-(Math.random()*.18+.04)*dpr,vx:(Math.random()-.5)*.08*dpr,
+    a:Math.random()*Math.PI*2,s:Math.random()*.012+.004}}
+  rs();for(let i=0;i<70;i++)P.push(mk());addEventListener("resize",rs);
+  (function f(){x.clearRect(0,0,W,H);for(const p of P){p.y+=p.vy;p.x+=p.vx+Math.sin(p.a)*.12;p.a+=p.s;
+    if(p.y<-10){p.y=H+10;p.x=Math.random()*W}
+    const al=(.35+.65*Math.abs(Math.sin(p.a)))*.55;const g=x.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*4);
+    g.addColorStop(0,`rgba(246,222,170,${al})`);g.addColorStop(1,"rgba(246,222,170,0)");x.fillStyle=g;x.beginPath();x.arc(p.x,p.y,p.r*4,0,7);x.fill()}
+    requestAnimationFrame(f)})();
+})();
+
+addEventListener("hashchange",show);show();
+</script>
+</body>
+</html>
